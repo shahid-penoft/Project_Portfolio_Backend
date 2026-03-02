@@ -33,7 +33,7 @@ export const getGalleryImages = async (req, res) => {
 
         const [rows] = await db.query(
             `SELECT
-         em.id, em.file_url, em.caption, em.created_at,
+         em.id, em.file_url, em.thumbnail_url, em.caption, em.created_at,
          e.id         AS event_id,
          e.event_name,
          e.event_date,
@@ -53,7 +53,7 @@ export const getGalleryImages = async (req, res) => {
             const key = row.event_type || 'Uncategorized';
             if (!grouped[key]) grouped[key] = { event_type_id: row.event_type_id, event_type: key, images: [] };
             grouped[key].images.push({
-                id: row.id, file_url: row.file_url, caption: row.caption,
+                id: row.id, file_url: row.file_url, thumbnail_url: row.thumbnail_url, caption: row.caption,
                 event_id: row.event_id, event_name: row.event_name, event_date: row.event_date,
                 created_at: row.created_at,
             });
@@ -85,7 +85,7 @@ export const getGalleryVideos = async (req, res) => {
 
         const [rows] = await db.query(
             `SELECT
-         em.id, em.file_url, em.caption, em.created_at,
+         em.id, em.file_url, em.thumbnail_url, em.caption, em.created_at,
          e.id         AS event_id,
          e.event_name,
          e.event_date,
@@ -105,7 +105,7 @@ export const getGalleryVideos = async (req, res) => {
             const key = row.event_type || 'Uncategorized';
             if (!grouped[key]) grouped[key] = { event_type_id: row.event_type_id, event_type: key, videos: [] };
             grouped[key].videos.push({
-                id: row.id, file_url: row.file_url, caption: row.caption,
+                id: row.id, file_url: row.file_url, thumbnail_url: row.thumbnail_url, caption: row.caption,
                 event_id: row.event_id, event_name: row.event_name, event_date: row.event_date,
                 created_at: row.created_at,
             });
@@ -238,7 +238,7 @@ export const listAdminMedia = async (req, res) => {
 
         const [rows] = await db.query(
             `SELECT
-                em.id, em.media_type AS type, em.file_url, em.caption, em.created_at,
+                em.id, em.media_type AS type, em.file_url, em.thumbnail_url, em.caption, em.created_at,
                 e.id AS event_id, e.event_name, e.event_date
              FROM event_media em
              JOIN events e ON e.id = em.event_id
@@ -289,7 +289,7 @@ const buildGalleryQuery = (mediaType, extraConditions = [], extraParams = []) =>
     const where = `WHERE ${conditions.join(' AND ')}`;
     const sql = `
         SELECT
-            em.id, em.file_url, em.caption, em.media_type, em.created_at,
+            em.id, em.file_url, em.thumbnail_url, em.caption, em.media_type, em.created_at,
             e.id         AS event_id,
             e.event_name,
             e.event_date,

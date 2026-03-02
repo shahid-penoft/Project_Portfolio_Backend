@@ -1,0 +1,16 @@
+✅  Database connected successfully
+Data in event_media:
+┌─────────┬────┬────────────┬──────────────────────────────────────────────────────────────────────┬───────────────┐
+│ (index) │ id │ media_type │ file_url                                                             │ thumbnail_url │
+├─────────┼────┼────────────┼──────────────────────────────────────────────────────────────────────┼───────────────┤
+│ 0       │ 8  │ 'photo'    │ 'https://images.unsplash.com/photo-1524178232363-1fb2b075b655?w=800' │ null          │
+│ 1       │ 9  │ 'photo'    │ 'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=800' │ null          │
+│ 2       │ 10 │ 'photo'    │ 'https://images.unsplash.com/photo-1576765608622-067973a79f53?w=800' │ null          │
+│ 3       │ 11 │ 'photo'    │ 'https://images.unsplash.com/photo-1559757148-5c350d0d3c56?w=800'    │ null          │
+│ 4       │ 12 │ 'photo'    │ 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=800' │ null          │
+│ 5       │ 13 │ 'photo'    │ 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=800' │ null          │
+│ 6       │ 14 │ 'photo'    │ 'https://images.unsplash.com/photo-1531206715517-5c0ba140b2b8?w=800' │ null          │
+│ 7       │ 15 │ 'photo'    │ 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?w=800' │ null          │
+│ 8       │ 16 │ 'photo'    │ 'https://images.unsplash.com/photo-1466611653911-95081537e5b7?w=800' │ null          │
+│ 9       │ 18 │ 'photo'    │ 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800' │ null          │
+└─────────┴────┴────────────┴──────────────────────────────────────────────────────────────────────┴───────────────┘

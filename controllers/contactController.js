@@ -57,6 +57,7 @@ export const submitContact = async (req, res) => {
         };
 
         // ── Enquiry Automations ──────────────────────────────────
+        let automationTriggered = false;
         const triggerAutomation = async () => {
             try {
                 const [[auto]] = await pool.query(
@@ -68,7 +69,10 @@ export const submitContact = async (req, res) => {
                     [enquiry.category]
                 );
 
+                console.log(`[AutomationCheck] Category: ${enquiry.category}, Found: ${!!auto}`);
+
                 if (auto) {
+                    automationTriggered = true;
                     let finalMessage = auto.content;
                     finalMessage = finalMessage.replace(/{name}/g, enquiry.full_name);
                     finalMessage = finalMessage.replace(/{email}/g, enquiry.email);
@@ -114,12 +118,20 @@ export const submitContact = async (req, res) => {
             }
         };
 
-        // Send both emails and check automation concurrently
-        Promise.all([
-            sendEnquiryReceivedEmail(enquiry).catch(e => console.error('[Email:UserConfirm]', e)),
-            sendAdminEnquiryAlert(enquiry).catch(e => console.error('[Email:AdminAlert]', e)),
-            triggerAutomation()
-        ]);
+        // Trigger automation and emails
+        await triggerAutomation();
+
+        const notifications = [
+            sendAdminEnquiryAlert(enquiry).catch(e => console.error('[Email:AdminAlert]', e))
+        ];
+
+        // Skip default confirmation ONLY if an automated EMAIL was triggered
+        // (If it was SMS/WhatsApp automation, we still want the email confirmation)
+        if (!automationTriggered) {
+            notifications.push(sendEnquiryReceivedEmail(enquiry).catch(e => console.error('[Email:UserConfirm]', e)));
+        }
+
+        await Promise.all(notifications);
 
         return successResponse(res, { id: enquiryId }, 'Your enquiry has been submitted successfully.', 201);
     } catch (err) {

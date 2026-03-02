@@ -63,6 +63,15 @@ export const uploadMedia = multer({
     limits: { fileSize: 200 * 1024 * 1024 },
 }).single('file');
 
+export const uploadMediaFields = multer({
+    storage,
+    fileFilter,
+    limits: { fileSize: 200 * 1024 * 1024 },
+}).fields([
+    { name: 'file', maxCount: 1 },
+    { name: 'thumbnail', maxCount: 1 },
+]);
+
 export const uploadThumbnail = multer({
     storage,
     fileFilter,
@@ -109,12 +118,12 @@ export const safeUploadIcon = (req, res, next) => {
     uploadIcon(req, res, (err) => {
         // Ensure req.body is an object
         if (!req.body) req.body = {};
-        
+
         // Log any multer errors but don't fail the request
         if (err) {
             console.warn('Multer error (non-fatal):', err.message);
         }
-        
+
         next();
     });
 };

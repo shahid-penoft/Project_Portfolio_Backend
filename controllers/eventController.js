@@ -2,7 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import db from '../configs/db.js';
-import { uploadMedia, uploadImage, runMulter } from '../configs/multer.js';
+import { uploadMedia, uploadMediaFields, uploadImage, runMulter } from '../configs/multer.js';
 import { successResponse, errorResponse } from '../utils/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -333,12 +333,8 @@ export const saveEventContent = async (req, res) => {
 export const addEventMedia = async (req, res) => {
     try {
         // Accept two fields: 'file' (the media) and 'thumbnail' (optional)
-        const multiUpload = uploadMedia.fields([
-            { name: 'file', maxCount: 1 },
-            { name: 'thumbnail', maxCount: 1 },
-        ]);
         await new Promise((resolve, reject) =>
-            multiUpload(req, res, (err) => (err ? reject(err) : resolve()))
+            uploadMediaFields(req, res, (err) => (err ? reject(err) : resolve()))
         );
 
         const { id } = req.params;
