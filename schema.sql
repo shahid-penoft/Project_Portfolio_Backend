@@ -318,3 +318,60 @@ CREATE TABLE IF NOT EXISTS contact_enquiries (
     INDEX idx_category  (category),
     INDEX idx_created   (created_at)
 );
+
+-- ─────────────────────────────────────────────────────────────
+--  TABLE: message_templates
+--  Stores SMS, WhatsApp, and Email templates
+-- ─────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS message_templates (
+    id              INT UNSIGNED    AUTO_INCREMENT PRIMARY KEY,
+    name            VARCHAR(255)    NOT NULL,
+    type            ENUM('sms', 'whatsapp', 'email') NOT NULL,
+    subject         VARCHAR(255)    DEFAULT NULL,
+    header_type     ENUM('none', 'text', 'image', 'video', 'document') DEFAULT 'none',
+    header_url      VARCHAR(500)    DEFAULT NULL,
+    content         TEXT            NOT NULL,
+    buttons_json    JSON            DEFAULT NULL,
+    is_active       BOOLEAN         NOT NULL DEFAULT 1,
+    created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_type (type)
+);
+
+-- ─────────────────────────────────────────────────────────────
+--  TABLE: enquiry_communications
+--  Stores log of messages sent to enquirers
+-- ─────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS enquiry_communications (
+    id              INT UNSIGNED    AUTO_INCREMENT PRIMARY KEY,
+    enquiry_id      INT UNSIGNED    NOT NULL,
+    template_id     INT UNSIGNED    DEFAULT NULL,
+    type            ENUM('sms', 'whatsapp', 'email', 'voice') NOT NULL,
+    recipient       VARCHAR(200)    NOT NULL,
+    message         TEXT            NOT NULL,
+    status          VARCHAR(50)     DEFAULT 'sent',
+    created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_comm_enquiry FOREIGN KEY (enquiry_id)
+        REFERENCES contact_enquiries(id) ON DELETE CASCADE,
+    CONSTRAINT fk_comm_template FOREIGN KEY (template_id)
+        REFERENCES message_templates(id) ON DELETE SET NULL,
+    INDEX idx_enquiry (enquiry_id),
+    INDEX idx_template (template_id),
+    INDEX idx_type (type)
+);
+
+-- ─────────────────────────────────────────────────────────────
+--  TABLE: enquiry_automations
+--  Maps enquiry categories to automatic response templates
+-- ─────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS enquiry_automations (
+    id              INT UNSIGNED    AUTO_INCREMENT PRIMARY KEY,
+    category        ENUM('membership','local issues','submit ideas','submit opinions','general') NOT NULL,
+    template_id     INT UNSIGNED    NOT NULL,
+    is_active       BOOLEAN         NOT NULL DEFAULT 1,
+    created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_auto_template FOREIGN KEY (template_id)
+        REFERENCES message_templates(id) ON DELETE CASCADE,
+    UNIQUE KEY uk_category (category)
+);

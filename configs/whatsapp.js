@@ -9,7 +9,7 @@ import axios from 'axios';
 const WHATSAPP_API_KEY = process.env.WHATSAPP_API_KEY;
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
 const WHATSAPP_BUSINESS_ACCOUNT_ID = process.env.WHATSAPP_BA_ID;
-const WHATSAPP_API_URL = `https://graph.instagram.com/v18.0/${WHATSAPP_PHONE_ID}/messages`;
+const WHATSAPP_API_URL = `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`;
 
 if (!WHATSAPP_API_KEY || !WHATSAPP_PHONE_ID) {
     console.warn('⚠️  WhatsApp API keys not configured. WhatsApp service will not work.');
@@ -80,9 +80,18 @@ export const sendWhatsAppTemplate = async (phoneNumber, templateName, parameters
                     },
                     ...(parameters.length > 0 && {
                         components: [
+                            // Header component for media
+                            ...(parameters.find(p => p.type === 'header') ? [{
+                                type: 'header',
+                                parameters: [parameters.find(p => p.type === 'header').payload]
+                            }] : []),
+                            // Body component for text placeholders
                             {
                                 type: 'body',
-                                parameters: parameters.map(p => ({ type: 'text', text: p })),
+                                parameters: parameters.filter(p => !p.type || p.type === 'text').map(p => ({
+                                    type: 'text',
+                                    text: typeof p === 'string' ? p : p.payload
+                                })),
                             },
                         ],
                     }),
@@ -104,4 +113,57 @@ export const sendWhatsAppTemplate = async (phoneNumber, templateName, parameters
     }
 };
 
-export default { sendWhatsAppMessage, sendWhatsAppTemplate };
+/**
+ * Send WhatsApp Interactive Message (with buttons and media)
+ * Use this for session messages (within 24h window) - does not require pre-approval.
+ */
+export const sendWhatsAppInteractive = async (phoneNumber, header, body, buttons = []) => {
+    if (!WHATSAPP_API_KEY || !WHATSAPP_PHONE_ID) {
+        throw new Error('WhatsApp API credentials are not configured.');
+    }
+
+    const payload = {
+        messaging_product: 'whatsapp',
+        to: phoneNumber,
+        type: 'interactive',
+        interactive: {
+            type: 'button',
+            body: { text: body },
+            action: {
+                buttons: buttons.slice(0, 3).map((btn, idx) => ({
+                    type: 'reply',
+                    reply: {
+                        id: `btn_${idx}`,
+                        title: btn.text.substring(0, 20)
+                    }
+                }))
+            }
+        }
+    };
+
+    if (header && header.type !== 'none') {
+        if (header.type === 'text') {
+            payload.interactive.header = { type: 'text', text: header.content };
+        } else {
+            payload.interactive.header = {
+                type: header.type,
+                [header.type]: { url: header.url }
+            };
+        }
+    }
+
+    try {
+        const response = await axios.post(WHATSAPP_API_URL, payload, {
+            headers: {
+                Authorization: `Bearer ${WHATSAPP_API_KEY}`,
+                'Content-Type': 'application/json',
+            },
+        });
+        return { success: true, data: response.data };
+    } catch (error) {
+        console.error('❌ WhatsApp Interactive Error:', error.response?.data || error.message);
+        throw new Error(error.response?.data?.error?.message || 'Failed to send WhatsApp interactive message');
+    }
+};
+
+export default { sendWhatsAppMessage, sendWhatsAppTemplate, sendWhatsAppInteractive };
