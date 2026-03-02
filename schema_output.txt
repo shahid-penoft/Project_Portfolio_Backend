@@ -1,0 +1,15 @@
+✅  Database connected successfully
+Schema for enquiry_communications:
+┌─────────┬───────────────┬──────────────────────────────────────────┬───────┬───────┬─────────────────────┬─────────────────────────────────────────────────┐
+│ (index) │ Field         │ Type                                     │ Null  │ Key   │ Default             │ Extra                                           │
+├─────────┼───────────────┼──────────────────────────────────────────┼───────┼───────┼─────────────────────┼─────────────────────────────────────────────────┤
+│ 0       │ 'id'          │ 'int unsigned'                           │ 'NO'  │ 'PRI' │ null                │ 'auto_increment'                                │
+│ 1       │ 'enquiry_id'  │ 'int unsigned'                           │ 'NO'  │ 'MUL' │ null                │ ''                                              │
+│ 2       │ 'template_id' │ 'int unsigned'                           │ 'YES' │ 'MUL' │ null                │ ''                                              │
+│ 3       │ 'type'        │ "enum('email','sms','whatsapp','voice')" │ 'NO'  │ ''    │ null                │ ''                                              │
+│ 4       │ 'recipient'   │ 'varchar(255)'                           │ 'NO'  │ ''    │ null                │ ''                                              │
+│ 5       │ 'message'     │ 'longtext'                               │ 'YES' │ ''    │ null                │ ''                                              │
+│ 6       │ 'status'      │ "enum('sent','failed','pending')"        │ 'YES' │ ''    │ 'sent'              │ ''                                              │
+│ 7       │ 'created_at'  │ 'timestamp'                              │ 'YES' │ 'MUL' │ 'CURRENT_TIMESTAMP' │ 'DEFAULT_GENERATED'                             │
+│ 8       │ 'updated_at'  │ 'timestamp'                              │ 'YES' │ ''    │ 'CURRENT_TIMESTAMP' │ 'DEFAULT_GENERATED on update CURRENT_TIMESTAMP' │
+└─────────┴───────────────┴──────────────────────────────────────────┴───────┴───────┴─────────────────────┴─────────────────────────────────────────────────┘
