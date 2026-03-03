@@ -7,6 +7,7 @@ import {
     updateSection,
     deleteSection,
     getLatestUpdates,
+    getAllUpdates,
     getPostsBySection,
     getAllPosts,
     getPostById,
@@ -21,6 +22,7 @@ const router = express.Router();
 
 // ─── Public ───────────────────────────────────────────────────
 router.get('/latest', getLatestUpdates);
+router.get('/all-updates', getAllUpdates);
 router.get('/sections', getPublicSections);
 router.get('/sections/all', getAllSections);       // ← must be before /:id wildcard
 router.get('/sections/:id/posts', getPostsBySection);
