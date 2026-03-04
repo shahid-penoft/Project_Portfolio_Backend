@@ -608,24 +608,58 @@ export const deleteAutomation = async (req, res) => {
 };
 
 // ─────────────────────────────────────────────────────────────
-//  GET /api/contact/stats  — Admin: summary counts
+//  GET /api/contact/stats  — Admin: summary counts + SLA metrics
 // ─────────────────────────────────────────────────────────────
 export const getEnquiryStats = async (req, res) => {
     try {
+        // Core status counts
         const [[totals]] = await pool.query(
             `SELECT
                 COUNT(*) AS total,
                 SUM(status = 'new')      AS new_count,
                 SUM(status = 'read')     AS read_count,
-                SUM(status = 'resolved') AS resolved_count
+                SUM(status = 'resolved') AS resolved_count,
+                SUM(status != 'resolved' AND created_at < NOW() - INTERVAL 72 HOUR) AS overdue_count
              FROM contact_enquiries`
         );
 
+        // Average resolution time (hours) for resolved enquiries
+        const [[resolution]] = await pool.query(
+            `SELECT ROUND(AVG(TIMESTAMPDIFF(HOUR, created_at, updated_at)), 1) AS avg_hours
+             FROM contact_enquiries
+             WHERE status = 'resolved'`
+        );
+
+        // By category breakdown
         const [byCategory] = await pool.query(
             `SELECT category, COUNT(*) AS count
              FROM contact_enquiries
              GROUP BY category
              ORDER BY count DESC`
+        );
+
+        // Last 7 days daily trend
+        const [weeklyTrend] = await pool.query(
+            `SELECT
+                DATE(created_at) AS day,
+                COUNT(*) AS count
+             FROM contact_enquiries
+             WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+             GROUP BY DATE(created_at)
+             ORDER BY day ASC`
+        );
+
+        // Top panchayats by volume
+        const [byPanchayat] = await pool.query(
+            `SELECT lb.name AS panchayat, COUNT(*) AS total,
+                    SUM(c.status = 'resolved') AS resolved,
+                    SUM(c.status != 'resolved' AND c.created_at < NOW() - INTERVAL 72 HOUR) AS overdue
+             FROM contact_enquiries c
+             LEFT JOIN local_bodies lb ON lb.id = c.panchayat_id
+             WHERE c.panchayat_id IS NOT NULL
+             GROUP BY c.panchayat_id, lb.name
+             ORDER BY total DESC
+             LIMIT 10`
         );
 
         return successResponse(res, {
@@ -634,12 +668,77 @@ export const getEnquiryStats = async (req, res) => {
                 new: Number(totals.new_count),
                 read: Number(totals.read_count),
                 resolved: Number(totals.resolved_count),
+                overdue: Number(totals.overdue_count || 0),
+                avg_resolution_hours: resolution.avg_hours ? Number(resolution.avg_hours) : null,
+                resolution_rate: totals.total > 0
+                    ? Math.round((Number(totals.resolved_count) / Number(totals.total)) * 100)
+                    : 0,
                 byCategory,
+                weeklyTrend,
+                byPanchayat,
             }
         }, 'Stats fetched.');
     } catch (err) {
         console.error('[getEnquiryStats]', err);
         return errorResponse(res, 'Failed to fetch stats.');
+    }
+};
+
+// ─────────────────────────────────────────────────────────────
+//  GET /api/contact/constituent?email=  — Constituent Profile
+// ─────────────────────────────────────────────────────────────
+export const getConstituentProfile = async (req, res) => {
+    const { email } = req.query;
+    if (!email?.trim()) return errorResponse(res, 'Email is required.', 400);
+
+    try {
+        // All enquiries from this email
+        const [enquiries] = await pool.query(
+            `SELECT c.id, c.category, c.subject, c.status, c.created_at, lb.name AS panchayat_name
+             FROM contact_enquiries c
+             LEFT JOIN local_bodies lb ON lb.id = c.panchayat_id
+             WHERE c.email = ?
+             ORDER BY c.created_at DESC`,
+            [email.trim()]
+        );
+
+        if (enquiries.length === 0) {
+            return successResponse(res, { data: { enquiries: [], stats: null } }, 'No profile found.');
+        }
+
+        // Stats summary
+        const total = enquiries.length;
+        const resolved = enquiries.filter(e => e.status === 'resolved').length;
+        const open = enquiries.filter(e => e.status !== 'resolved').length;
+        const categories = [...new Set(enquiries.map(e => e.category))];
+        const firstSeen = enquiries[enquiries.length - 1].created_at;
+        const lastSeen = enquiries[0].created_at;
+
+        // Get the person's name from most recent
+        const [[person]] = await pool.query(
+            `SELECT full_name, mobile FROM contact_enquiries WHERE email = ? ORDER BY created_at DESC LIMIT 1`,
+            [email.trim()]
+        );
+
+        return successResponse(res, {
+            data: {
+                enquiries,
+                stats: {
+                    full_name: person.full_name,
+                    mobile: person.mobile,
+                    email: email.trim(),
+                    total,
+                    resolved,
+                    open,
+                    categories,
+                    first_seen: firstSeen,
+                    last_seen: lastSeen,
+                }
+            }
+        }, 'Constituent profile fetched.');
+    } catch (err) {
+        console.error('[getConstituentProfile]', err);
+        return errorResponse(res, 'Failed to fetch constituent profile.');
     }
 };
 
