@@ -12,6 +12,7 @@ import {
     addYouTubeMedia,
     deleteEventMedia,
     uploadInlineImage,
+    sendEventInvitations,
 } from '../controllers/eventController.js';
 
 const router = express.Router();
@@ -31,6 +32,7 @@ router.post('/:id/content', saveEventContent);
 router.post('/:id/media', addEventMedia);
 router.post('/:id/youtube', addYouTubeMedia);
 router.post('/:id/upload-inline-image', uploadInlineImage);
+router.post('/:id/invite', sendEventInvitations);
 router.delete('/media/:mediaId', deleteEventMedia);
 
 export default router;

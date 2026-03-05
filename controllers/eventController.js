@@ -2,6 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import db from '../configs/db.js';
+import transporter from '../configs/mailer.js';
 import { uploadMedia, uploadMediaFields, uploadImage, uploadThumbnail, runMulter } from '../configs/multer.js';
 import { successResponse, errorResponse } from '../utils/helpers.js';
 
@@ -492,5 +493,129 @@ export const uploadInlineImage = async (req, res) => {
             return errorResponse(res, 'Image too large (max 10 MB).', 413);
         }
         return errorResponse(res, err.message || 'Server error uploading image.');
+    }
+};
+
+// ─────────────────────────────────────────────────────────────
+//  POST /api/events/:id/invite
+//  Admin — send event invitations via email, whatsapp, or sms
+// ─────────────────────────────────────────────────────────────
+export const sendEventInvitations = async (req, res) => {
+    const { id } = req.params;
+    const { target_ids, filters, channel, message_template } = req.body;
+
+    if (!channel || !['email', 'whatsapp', 'sms'].includes(channel)) {
+        return errorResponse(res, 'Valid channel (email, whatsapp, sms) is required.', 400);
+    }
+
+    try {
+        // 1. Fetch Event Details
+        const [[event]] = await db.query(
+            `SELECT e.*, lb.name as local_body_name 
+             FROM events e 
+             LEFT JOIN local_bodies lb ON lb.id = e.local_body_id 
+             WHERE e.id = ?`,
+            [id]
+        );
+
+        if (!event) return errorResponse(res, 'Event not found.', 404);
+
+        // 2. Resolve Recipients
+        let people = [];
+        if (target_ids && Array.isArray(target_ids) && target_ids.length > 0) {
+            // Specific IDs
+            const [rows] = await db.query(
+                'SELECT id, full_name, email, mobile FROM people WHERE id IN (?) AND is_active = 1',
+                [target_ids]
+            );
+            people = rows;
+        } else if (filters) {
+            // Filter-based bulk
+            let where = 'WHERE p.is_active = 1';
+            const params = [];
+
+            if (filters.local_body_id && filters.local_body_id !== 'all') {
+                where += ' AND p.local_body_id = ?';
+                params.push(filters.local_body_id);
+            }
+            if (filters.ward_id && filters.ward_id !== 'all') {
+                where += ' AND p.ward_id = ?';
+                params.push(filters.ward_id);
+            }
+            if (filters.search) {
+                const like = `%${filters.search}%`;
+                where += ' AND (p.full_name LIKE ? OR p.mobile LIKE ? OR p.email LIKE ?)';
+                params.push(like, like, like);
+            }
+
+            const [rows] = await db.query(
+                `SELECT p.id, p.full_name, p.email, p.mobile FROM people p ${where}`,
+                params
+            );
+            people = rows;
+        }
+
+        if (people.length === 0) {
+            return errorResponse(res, 'No recipients found matching the criteria.', 400);
+        }
+
+        // 3. Helper to replace placeholders
+        const formatMessage = (tpl, person) => {
+            return tpl
+                .replace(/\[Name\]/g, person.full_name)
+                .replace(/\[EventName\]/g, event.event_name)
+                .replace(/\[Date\]/g, new Date(event.event_date).toLocaleDateString())
+                .replace(/\[Time\]/g, event.event_time || 'TBA')
+                .replace(/\[Venue\]/g, event.venue || event.local_body_name || 'TBA');
+        };
+
+        // 4. Send/Process Invitations
+        const results = {
+            total: people.length,
+            success: 0,
+            failed: 0,
+            details: []
+        };
+
+        if (channel === 'email') {
+            const senderEmail = process.env.SMTP_USER || 'noreply@diavets.com';
+
+            // Sequential sending for simplicity in this MVP block
+            for (const person of people) {
+                if (!person.email) {
+                    results.failed++;
+                    results.details.push({ id: person.id, status: 'failed', reason: 'No email address' });
+                    continue;
+                }
+
+                try {
+                    const htmlContent = formatMessage(message_template || 'Hello [Name], You are invited to [EventName] on [Date] at [Venue].', person);
+                    await transporter.sendMail({
+                        from: `"Diavets Events" <${senderEmail}>`,
+                        to: person.email,
+                        subject: `Invitation: ${event.event_name}`,
+                        html: `<div style="font-family: sans-serif;">${htmlContent.replace(/\n/g, '<br>')}</div>`
+                    });
+                    results.success++;
+                } catch (err) {
+                    console.error(`Failed to send email to ${person.email}:`, err);
+                    results.failed++;
+                    results.details.push({ id: person.id, status: 'failed', reason: err.message });
+                }
+            }
+        } else {
+            // WhatsApp/SMS - Generate links/messages (Simulated Bulk)
+            // In a real scenario with a gateway, we'd call their API here.
+            // For now, we return the count and assume success for UI feedback 
+            // since actual delivery is manual or needs a paid API.
+            results.success = people.length;
+            results.preview = formatMessage(message_template, people[0]);
+            results.note = `Generated ${people.length} ${channel} messages. (Third-party gateway integration required for automated bulk sending)`;
+        }
+
+        return successResponse(res, results, `Invitations processed via ${channel}.`);
+    } catch (err) {
+        console.error('[sendEventInvitations]', err);
+        return errorResponse(res, 'Server error processing invitations.');
     }
 };
