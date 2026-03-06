@@ -381,8 +381,8 @@ const paginatedGalleryResponse = async (res, mediaType, conditions, params, req,
     const emConditions = [`em.media_type = '${type}'`, ...conditions];
     const emParams = [...params];
     if (search) {
-        emConditions.push('e.event_name LIKE ?');
-        emParams.push(`%${search}%`);
+        emConditions.push('(e.event_name LIKE ? OR em.caption LIKE ?)');
+        emParams.push(`%${search}%`, `%${search}%`);
     }
     const emWhere = `WHERE ${emConditions.join(' AND ')}`;
 
@@ -496,12 +496,7 @@ export const getImagesByYear = async (req, res) => {
 // GET /api/gallery/images/search?q=...
 export const searchImages = async (req, res) => {
     try {
-        const q = req.query.q || req.query.search || '';
-        await paginatedGalleryResponse(res, 'photo',
-            q ? ['e.event_name LIKE ?'] : [],
-            q ? [`%${q}%`] : [],
-            { query: {} }, // skip double-search
-            'Images search');
+        await paginatedGalleryResponse(res, 'photo', [], [], req, 'Images search');
     } catch (err) {
         console.error('[searchImages]', err);
         return errorResponse(res, 'Server error searching images.');
@@ -551,12 +546,7 @@ export const getVideosByYear = async (req, res) => {
 // GET /api/gallery/videos/search?q=...
 export const searchVideos = async (req, res) => {
     try {
-        const q = req.query.q || req.query.search || '';
-        await paginatedGalleryResponse(res, 'video',
-            q ? ['e.event_name LIKE ?'] : [],
-            q ? [`%${q}%`] : [],
-            { query: {} },
-            'Videos search');
+        await paginatedGalleryResponse(res, 'video', [], [], req, 'Videos search');
     } catch (err) {
         console.error('[searchVideos]', err);
         return errorResponse(res, 'Server error searching videos.');

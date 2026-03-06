@@ -1,4 +1,4 @@
-
+import xlsx from 'xlsx';
 import pool from '../configs/db.js';
 import { successResponse, errorResponse } from '../utils/helpers.js';
 
@@ -177,5 +177,88 @@ export const updatePerson = async (req, res) => {
     } catch (err) {
         console.error('[updatePerson]', err);
         return errorResponse(res, 'Failed to update resident record.');
+    }
+};
+
+// ─────────────────────────────────────────────────────────────
+//  POST /api/people/import  — Admin: bulk import residents
+// ─────────────────────────────────────────────────────────────
+export const importPeople = async (req, res) => {
+    if (!req.file) {
+        return errorResponse(res, 'No Excel file uploaded.', 400);
+    }
+
+    try {
+        const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
+        const sheetName = workbook.SheetNames[0];
+        const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+        if (!rows || rows.length === 0) {
+            return errorResponse(res, 'The uploaded Excel file is empty or has an invalid format.', 400);
+        }
+
+        let importedCount = 0;
+        let errorCount = 0;
+
+        const normalizeKey = (k) => String(k).trim().toLowerCase().replace(/\s+/g, '_');
+
+        for (const rawRow of rows) {
+            const row = {};
+            for (const key in rawRow) {
+                row[normalizeKey(key)] = rawRow[key];
+            }
+
+            // Map and resolve fields
+            const fullName = row.full_name || row.name;
+            const mobile = row.mobile || row.mobile_number || row.phone;
+            const localBodyId = row.local_body_id || row.panchayat_id;
+            const wardId = row.ward_id;
+
+            // Required fields validation
+            if (!fullName || !mobile || !localBodyId || !wardId) {
+                errorCount++;
+                continue;
+            }
+
+            const email = row.email || null;
+            const houseName = row.house_name || null;
+            const houseNo = row.house_no || null;
+            const voterId = row.voter_id || null;
+            const rawGender = String(row.gender || '').toLowerCase();
+            const gender = ['male', 'female', 'other'].includes(rawGender) ? rawGender : 'male';
+
+            // Date formatting
+            let dateOfBirth = null;
+            if (row.date_of_birth) {
+                const pd = new Date(row.date_of_birth);
+                if (!isNaN(pd.getTime())) {
+                    dateOfBirth = pd.toISOString().substring(0, 10);
+                }
+            }
+
+            try {
+                await pool.query(
+                    `INSERT INTO people (
+                        full_name, mobile, email, local_body_id, ward_id, 
+                        house_name, house_no, voter_id, gender, date_of_birth
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [fullName, mobile, email, localBodyId, wardId, houseName, houseNo, voterId, gender, dateOfBirth]
+                );
+                importedCount++;
+            } catch (err) {
+                console.error('[importPeople] Error inserting row:', row, err.message);
+                errorCount++;
+            }
+        }
+
+        return successResponse(
+            res,
+            { importedCount, errorCount },
+            `Import complete. Successfully added ${importedCount} records.` + (errorCount > 0 ? ` Failed to add ${errorCount} records.` : ''),
+            201
+        );
+    } catch (err) {
+        console.error('[importPeople]', err);
+        return errorResponse(res, 'Failed to import records. Ensure the file is a valid Excel document.');
     }
 };
