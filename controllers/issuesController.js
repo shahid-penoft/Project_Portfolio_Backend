@@ -494,8 +494,8 @@ export const getIssues = async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 export const getIssueStats = async (req, res) => {
     try {
-        const [statusRows] = await pool.query(`SELECT status, COUNT(*) as count FROM issues GROUP BY status`);
-        const [[{ total }]] = await pool.query(`SELECT COUNT(*) as total FROM issues`);
+        const [statusRows] = await pool.query(`SELECT status, COUNT(*) as count FROM issues WHERE is_deleted = 0 GROUP BY status`);
+        const [[{ total }]] = await pool.query(`SELECT COUNT(*) as total FROM issues WHERE is_deleted = 0`);
         const stats = { total };
         statusRows.forEach(row => { stats[row.status] = row.count });
         res.json({ success: true, data: stats });
@@ -567,7 +567,7 @@ export const createIssue = async (req, res) => {
         `, [
             reference_no,
             title,
-            category || await getDropdownDefault('system_category') || 'Other',
+            category || null,
             affected_by || null,
             resolved_date || null,
             priority || await getDropdownDefault('issue_priority') || 'Medium',

@@ -27,7 +27,9 @@ export const getUnifiedItems = async (req, res) => {
             localBody = '',
             ward = '',
             createdBy = '',
-            deletedBy = ''
+            deletedBy = '',
+            category = '',
+            department = ''
         } = req.query;
 
         const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -51,6 +53,8 @@ export const getUnifiedItems = async (req, res) => {
                 IFNULL(c.reference_no, CONCAT('C-', c.id)) AS display_id,
                 'Complaints' AS module,
                 c.title AS title,
+                c.category AS category,
+                c.department AS department,
                 c.local_body_id AS local_body_id,
                 lb.name AS local_body_name,
                 c.ward_id AS ward_id,
@@ -81,6 +85,8 @@ export const getUnifiedItems = async (req, res) => {
                 IFNULL(i.reference_no, CONCAT('P-', i.id)) AS display_id,
                 'Public Issue' AS module,
                 i.title AS title,
+                i.category AS category,
+                i.department AS department,
                 i.local_body_id AS local_body_id,
                 lb.name AS local_body_name,
                 i.ward_id AS ward_id,
@@ -110,7 +116,9 @@ export const getUnifiedItems = async (req, res) => {
                 f.id AS raw_id,
                 CAST(f.id AS CHAR) AS display_id,
                 'Applications' AS module,
-                IFNULL(f.applicant_name, 'Untitled Application') AS title,
+                COALESCE(NULLIF(TRIM(f.application_title), ''), f.applicant_name, 'Untitled Application') AS title,
+                c.name AS category,
+                NULL AS department,
                 f.local_body_id AS local_body_id,
                 lb.name AS local_body_name,
                 f.ward_id AS ward_id,
@@ -128,6 +136,7 @@ export const getUnifiedItems = async (req, res) => {
                 f.applicant_name AS submitter_name,
                 del_u.full_name AS deleted_by
             FROM cm_fund_requests f
+            LEFT JOIN cm_fund_categories c ON f.category_id = c.id
             LEFT JOIN local_bodies lb ON f.local_body_id = lb.id
             LEFT JOIN local_body_wards w ON f.ward_id = w.id
             LEFT JOIN admin_users u ON f.submitted_by_id = u.id
@@ -141,6 +150,8 @@ export const getUnifiedItems = async (req, res) => {
                 IFNULL(l.letter_id COLLATE utf8mb4_unicode_ci, CONCAT('L-', l.id)) AS display_id,
                 'Letters' AS module,
                 l.subject AS title,
+                NULL AS category,
+                NULL AS department,
                 NULL AS local_body_id,
                 NULL AS local_body_name,
                 NULL AS ward_id,
@@ -169,6 +180,8 @@ export const getUnifiedItems = async (req, res) => {
                 IF(g.governing_body_type COLLATE utf8mb4_unicode_ci ='OTHER', CONCAT('O-', g.id), CONCAT('M-', g.id)) AS display_id,
                 IF(g.governing_body_type COLLATE utf8mb4_unicode_ci ='OTHER', 'Office', 'Governing Body') AS module,
                 g.name AS title,
+                NULL AS category,
+                NULL AS department,
                 g.local_body_id AS local_body_id,
                 lb.name AS local_body_name,
                 g.ward_id AS ward_id,
@@ -211,6 +224,8 @@ export const getUnifiedItems = async (req, res) => {
                 IFNULL(id.reference_no, CONCAT('I-', id.id)) AS display_id,
                 'Ideas' AS module,
                 id.title AS title,
+                id.category AS category,
+                id.department AS department,
                 id.local_body_id AS local_body_id,
                 lb.name AS local_body_name,
                 id.ward_id AS ward_id,
@@ -241,6 +256,8 @@ export const getUnifiedItems = async (req, res) => {
                 IFNULL(s.reference_no, CONCAT('S-', s.id)) AS display_id,
                 'Suggestions' AS module,
                 s.title AS title,
+                s.category AS category,
+                s.department AS department,
                 s.local_body_id AS local_body_id,
                 lb.name AS local_body_name,
                 s.ward_id AS ward_id,
@@ -277,6 +294,20 @@ export const getUnifiedItems = async (req, res) => {
             const placeholders = mArray.map(() => '?').join(',');
             outerQuery += ` AND module IN (${placeholders})`;
             params.push(...mArray);
+        }
+
+        const catArray = parseArrayParam(category).filter(c => c !== 'All');
+        if (catArray.length > 0) {
+            const placeholders = catArray.map(() => '?').join(',');
+            outerQuery += ` AND category IN (${placeholders})`;
+            params.push(...catArray);
+        }
+
+        const deptArray = parseArrayParam(department).filter(d => d !== 'All');
+        if (deptArray.length > 0) {
+            const deptClauses = deptArray.map(() => 'department LIKE ?');
+            outerQuery += ` AND (${deptClauses.join(' OR ')})`;
+            deptArray.forEach(d => params.push(`%${d}%`));
         }
 
         const rawAppType = application_type || applicationType;

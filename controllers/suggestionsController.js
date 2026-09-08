@@ -105,12 +105,12 @@ const fetchFullSuggestion = async (id) => {
              cl.entity_id COLLATE utf8mb4_unicode_ci = ? 
              OR cl.entity_id COLLATE utf8mb4_unicode_ci = ?
          )
-         ORDER BY cl.created_at ASC`, 
+         ORDER BY cl.created_at ASC`,
         [String(realId), String(suggestion.reference_no || realId)]
     );
     const combinedUpdatesRaw = [...updates, ...commLogs].sort((a, b) => (new Date(b.created_at) - new Date(a.created_at)) || ((Number(b.id) || 0) - (Number(a.id) || 0)));
 
-    const [allMedia]       = await pool.query('SELECT * FROM suggestion_media       WHERE suggestion_id = ? ORDER BY created_at ASC', [realId]);
+    const [allMedia] = await pool.query('SELECT * FROM suggestion_media       WHERE suggestion_id = ? ORDER BY created_at ASC', [realId]);
     const [allAttachments] = await pool.query('SELECT * FROM suggestion_attachments WHERE suggestion_id = ? ORDER BY created_at ASC', [realId]);
 
     const mappedUpdates = combinedUpdatesRaw.map(u => ({
@@ -118,8 +118,8 @@ const fetchFullSuggestion = async (id) => {
         gallery: allMedia
             .filter(m => m.update_id === u.id)
             .map(m => ({
-                id:   m.id,
-                url:  m.file_url,
+                id: m.id,
+                url: m.file_url,
                 type: m.media_type,
                 name: m.caption || m.file_url.split('/').pop(),
                 size: m.file_size_kb != null ? Number(m.file_size_kb) * 1024 : null,
@@ -127,16 +127,16 @@ const fetchFullSuggestion = async (id) => {
         attachments: allAttachments
             .filter(a => a.update_id === u.id)
             .map(a => ({
-                id:   a.id,
+                id: a.id,
                 name: a.file_name,
                 size: a.file_size_kb ? `${(a.file_size_kb / 1024).toFixed(1)} MB` : 'Unknown',
                 type: a.file_type,
-                url:  a.file_url,
+                url: a.file_url,
             })),
     }));
-    const media       = allMedia;
+    const media = allMedia;
     const attachments = allAttachments;
-    const [team]        = await pool.query(`
+    const [team] = await pool.query(`
         SELECT st.id, st.role_label, st.created_at,
                au.id as admin_user_id, au.full_name as name, au.email
         FROM suggestion_team st
@@ -144,7 +144,7 @@ const fetchFullSuggestion = async (id) => {
         WHERE st.suggestion_id = ?
         ORDER BY st.created_at ASC
     `, [realId]);
-    const [activity]    = await pool.query(`
+    const [activity] = await pool.query(`
         SELECT sa.*, COALESCE(au.full_name, s.complainant_name, 'Citizen') as author_name 
         FROM suggestion_activity sa
         LEFT JOIN admin_users au ON sa.admin_user_id = au.id
@@ -164,9 +164,9 @@ const parseDayLabel = (label) => {
     if (!match) return null;
     const n = parseInt(match[1]);
     const unit = match[2].toLowerCase();
-    if (unit.startsWith('day'))   return n;
+    if (unit.startsWith('day')) return n;
     if (unit.startsWith('month')) return n * 30;
-    if (unit.startsWith('year'))  return n * 365;
+    if (unit.startsWith('year')) return n * 365;
     return null;
 };
 
@@ -205,11 +205,37 @@ export const getSuggestions = async (req, res) => {
             params.push(req.constituent.id);
         }
 
-        if (status)   { conditions.push('i.status = ?');   params.push(status); }
-        if (category && category !== 'All') { conditions.push('i.category = ?'); params.push(category); }
-        if (department) { conditions.push('i.department LIKE ?'); params.push('%' + department + '%'); }
+        if (status) { conditions.push('i.status = ?'); params.push(status); }
+
+        if (category && category !== 'All') {
+            const catList = Array.isArray(category)
+                ? category
+                : String(category).split(',').map(c => c.trim()).filter(Boolean);
+            if (catList.length === 1) {
+                conditions.push('i.category = ?');
+                params.push(catList[0]);
+            } else if (catList.length > 1) {
+                conditions.push(`i.category IN (${catList.map(() => '?').join(',')})`);
+                params.push(...catList);
+            }
+        }
+
+        if (department && department !== 'All') {
+            const deptList = Array.isArray(department)
+                ? department
+                : String(department).split(',').map(d => d.trim()).filter(Boolean);
+            if (deptList.length > 0) {
+                const deptClauses = deptList.map(() => '(i.department LIKE ? OR i.department_name LIKE ?)');
+                conditions.push(`(${deptClauses.join(' OR ')})`);
+                deptList.forEach(dept => {
+                    const pattern = `%${dept}%`;
+                    params.push(pattern, pattern);
+                });
+            }
+        }
+
         if (priority && priority !== 'All') { conditions.push('i.priority = ?'); params.push(priority); }
-        
+
         const lbId = local_body_id || local_body;
         if (lbId) { conditions.push('i.local_body_id = ?'); params.push(lbId); }
 
@@ -333,11 +359,11 @@ export const getSuggestions = async (req, res) => {
 
         // Dynamic sort (allowlisted columns to prevent SQL injection)
         const SORT_COLS = {
-            created_at:          'i.created_at',
-            updated_at:          'i.updated_at',
-            priority:            'i.priority',
-            title:               'i.title',
-            complainant_name:    'i.complainant_name',
+            created_at: 'i.created_at',
+            updated_at: 'i.updated_at',
+            priority: 'i.priority',
+            title: 'i.title',
+            complainant_name: 'i.complainant_name',
             filed_by_admin_name: 'au.full_name',
         };
         const sortCol = SORT_COLS[sort] || 'i.created_at';
@@ -401,8 +427,8 @@ export const getSuggestions = async (req, res) => {
 
 export const getSuggestionStats = async (req, res) => {
     try {
-        const [statusRows] = await pool.query(`SELECT status, COUNT(*) as count FROM suggestions GROUP BY status`);
-        const [[{ total }]] = await pool.query(`SELECT COUNT(*) as total FROM suggestions`);
+        const [statusRows] = await pool.query(`SELECT status, COUNT(*) as count FROM suggestions WHERE is_deleted = 0 GROUP BY status`);
+        const [[{ total }]] = await pool.query(`SELECT COUNT(*) as total FROM suggestions WHERE is_deleted = 0`);
         const stats = { total };
         statusRows.forEach(row => { stats[row.status] = row.count });
         res.json({ success: true, data: stats });
@@ -441,8 +467,8 @@ export const createSuggestion = async (req, res) => {
             status_details,
         } = req.body;
 
-        const internal_note = req.body.internal_note !== undefined 
-            ? req.body.internal_note 
+        const internal_note = req.body.internal_note !== undefined
+            ? req.body.internal_note
             : (req.body.remarks !== undefined ? req.body.remarks : (req.body.notes !== undefined ? req.body.notes : (req.body.remark !== undefined ? req.body.remark : null)));
 
         if (!title || !complainant_name || !phone) {
@@ -451,22 +477,24 @@ export const createSuggestion = async (req, res) => {
 
         const reference_no = await generateReferenceNo();
         const constituentId = req.constituent?.id || null;
-        const adminId       = req.admin?.id       || null;
+        const adminId = req.admin?.id || null;
         const isAdminCreation = req.headers['x-app-portal'] === 'admin' || (adminId && !constituentId);
         const submission_source = isAdminCreation ? 'Admin Panel' : 'Public Portal';
         const initialStatus = status || (isAdminCreation ? (await getDropdownDefault('suggestion_status') || 'Pending') : 'Draft');
+
+        const finalDept = department || req.body.department_name || null;
 
         const [result] = await pool.query(`
             INSERT INTO suggestions
               (reference_no, title, category, priority, status, description, location, address, address_line1, latitude, longitude, internal_note,
                complainant_name, phone, alternative_phone, email,
-               local_body_id, ward_id, department,
+               local_body_id, ward_id, department, department_name,
                constituent_user_id, filed_by_admin_id, date_filed, submission_source)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `, [
             reference_no,
             title,
-            category || await getDropdownDefault('system_category') || 'Other',
+            category || null,
             priority || await getDropdownDefault('suggestion_priority') || 'Medium',
             initialStatus,
             description || null,
@@ -482,7 +510,8 @@ export const createSuggestion = async (req, res) => {
             email || null,
             local_body_id || null,
             ward_id || null,
-            department || null,
+            finalDept,
+            finalDept,
             constituentId,
             adminId,
             date_filed || new Date().toISOString().split('T')[0],
@@ -493,11 +522,11 @@ export const createSuggestion = async (req, res) => {
         await logActivity(newId, `Suggestion "${title}" filed. Reference: ${reference_no}`, req.admin?.id);
         auditLog(req, { action: 'Created', module: 'Suggestions', details: `Suggestion filed — "${title}" (${reference_no})`, resource: `suggestions/${newId}`, severity: 'info' });
         broadcastNotification({
-          title: `New Suggestion ${reference_no}`,
-          message: `"${title}" submitted by ${complainant_name}.`,
-          type: 'message', module: 'Suggestions',
-          record_id: newId, record_ref: reference_no,
-          link_path: `/mlaconnect/suggestions/${newId}`,
+            title: `New Suggestion ${reference_no}`,
+            message: `"${title}" submitted by ${complainant_name}.`,
+            type: 'message', module: 'Suggestions',
+            record_id: newId, record_ref: reference_no,
+            link_path: `/mlaconnect/suggestions/${newId}`,
         });
 
         // Auto-insert timeline update.
@@ -506,7 +535,7 @@ export const createSuggestion = async (req, res) => {
         // - Admin creation without status_details → insert nothing (no regression)
         const sdTrimmed = status_details?.trim();
         const updateTitle = sdTrimmed || (isAdminCreation ? null : 'We are reviewing your submission.');
-        const updateNote  = sdTrimmed ? null : (isAdminCreation ? null : `Your suggestion has been registered and is under initial review by the MLA Office.\n\nContributor: ${complainant_name}\nTracking ID: ${reference_no}`);
+        const updateNote = sdTrimmed ? null : (isAdminCreation ? null : `Your suggestion has been registered and is under initial review by the MLA Office.\n\nContributor: ${complainant_name}\nTracking ID: ${reference_no}`);
         if (updateTitle) {
             await pool.query(
                 `INSERT INTO suggestion_updates (suggestion_id, type, title, note, admin_user_id, created_at) VALUES (?, 'Status Update', ?, ?, ?, NOW())`,
@@ -516,9 +545,9 @@ export const createSuggestion = async (req, res) => {
 
         // Fire-and-forget: SMS & Email confirmation to complainant
         const dateStr = new Date(date_filed || Date.now()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-        
-        const channels = Array.isArray(notify_channels) 
-            ? notify_channels 
+
+        const channels = Array.isArray(notify_channels)
+            ? notify_channels
             : (typeof notify_channels === 'string' ? notify_channels.split(',').map(s => s.trim()) : []);
         const isLegacyNotify = notify_complainant === true || notify_complainant === 'true';
         const shouldSendSMS = channels.includes('sms') || isLegacyNotify;
@@ -555,7 +584,7 @@ export const createSuggestion = async (req, res) => {
         if (shouldSendEmail && email && email.trim()) {
             const reviewMsg = status_details?.trim() || "We are reviewing your submission.";
             let emailBody = custom_email_message?.trim() || `Hi ${complainant_name},\n\nSuggestion received: ${dateStr}\n${reviewMsg}\nTracking ID: ${reference_no}\n\nOffice of Kothamangalam MLA`;
-            
+
             emailBody = emailBody
                 .replace(/\[Pending ID\]/g, reference_no)
                 .replace(/{reference_no}/g, reference_no)
@@ -598,9 +627,11 @@ export const updateSuggestion = async (req, res) => {
             status_details,
         } = req.body;
 
-        const internal_note = req.body.internal_note !== undefined 
-            ? req.body.internal_note 
+        const internal_note = req.body.internal_note !== undefined
+            ? req.body.internal_note
             : (req.body.remarks !== undefined ? req.body.remarks : (req.body.notes !== undefined ? req.body.notes : (req.body.remark !== undefined ? req.body.remark : undefined)));
+
+        const finalDept = department !== undefined ? department : (req.body.department_name !== undefined ? req.body.department_name : undefined);
 
         const [result] = await pool.query(`
             UPDATE suggestions SET
@@ -622,6 +653,7 @@ export const updateSuggestion = async (req, res) => {
               local_body_id = COALESCE(?, local_body_id),
               ward_id = COALESCE(?, ward_id),
               department = COALESCE(?, department),
+              department_name = COALESCE(?, department_name),
               date_filed = COALESCE(?, date_filed),
               updated_by_admin_id = ?
             WHERE id = ?
@@ -629,7 +661,7 @@ export const updateSuggestion = async (req, res) => {
             title, category, priority, status, description, location, address, address_line1, latitude, longitude,
             ...(internal_note !== undefined ? [internal_note] : []),
             complainant_name, phone, alternative_phone, email,
-            local_body_id, ward_id, department, date_filed, req.admin?.id || null, id,
+            local_body_id, ward_id, finalDept, finalDept, date_filed, req.admin?.id || null, id,
         ]);
 
         if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'Suggestion not found.' });
@@ -664,22 +696,22 @@ export const updateSuggestionStatus = async (req, res) => {
         const [sTeam] = await pool.query('SELECT admin_user_id FROM suggestion_team WHERE suggestion_id = ?', [id]);
         const [[sRec]] = await pool.query('SELECT reference_no FROM suggestions WHERE id = ?', [id]);
         sTeam.forEach(m => createNotification(m.admin_user_id, {
-          title: `Status updated on Suggestion ${sRec?.reference_no || `#${id}`}`,
-          message: `Status changed to "${status}".`,
-          type: 'info', module: 'Suggestions',
-          record_id: Number(id), record_ref: sRec?.reference_no || null,
-          link_path: `/mlaconnect/suggestions/${id}`,
+            title: `Status updated on Suggestion ${sRec?.reference_no || `#${id}`}`,
+            message: `Status changed to "${status}".`,
+            type: 'info', module: 'Suggestions',
+            record_id: Number(id), record_ref: sRec?.reference_no || null,
+            link_path: `/mlaconnect/suggestions/${id}`,
         }));
         // Notify the constituent who filed this suggestion
         const [[sFiler]] = await pool.query('SELECT constituent_user_id, reference_no FROM suggestions WHERE id = ?', [id]);
         if (sFiler?.constituent_user_id) {
-          notifyUser(sFiler.constituent_user_id, {
-            title: `Your Suggestion ${sFiler.reference_no || `#${id}`} was updated`,
-            message: `Status changed to "${status}". Check your submissions for details.`,
-            type: 'info', module: 'Suggestions',
-            record_ref: sFiler.reference_no || null,
-            link_path: `/mla-connect/submissions/${id}`,
-          });
+            notifyUser(sFiler.constituent_user_id, {
+                title: `Your Suggestion ${sFiler.reference_no || `#${id}`} was updated`,
+                message: `Status changed to "${status}". Check your submissions for details.`,
+                type: 'info', module: 'Suggestions',
+                record_ref: sFiler.reference_no || null,
+                link_path: `/mla-connect/submissions/${id}`,
+            });
         }
         res.json({ success: true, message: `Status updated to ${status}.` });
     } catch (err) {
@@ -781,21 +813,21 @@ export const addSuggestionUpdate = async (req, res) => {
         const [sUpdateTeam] = await pool.query('SELECT admin_user_id FROM suggestion_team WHERE suggestion_id = ?', [id]);
         const [[sRec2]] = await pool.query('SELECT reference_no, constituent_user_id FROM suggestions WHERE id = ?', [id]);
         sUpdateTeam.forEach(m => createNotification(m.admin_user_id, {
-          title: `New update on Suggestion ${sRec2?.reference_no || `#${id}`}`,
-          message: `"${title}" — a new update has been added.`,
-          type: 'message', module: 'Suggestions',
-          record_id: Number(id), record_ref: sRec2?.reference_no || null,
-          link_path: `/mlaconnect/suggestions/${id}`,
+            title: `New update on Suggestion ${sRec2?.reference_no || `#${id}`}`,
+            message: `"${title}" — a new update has been added.`,
+            type: 'message', module: 'Suggestions',
+            record_id: Number(id), record_ref: sRec2?.reference_no || null,
+            link_path: `/mlaconnect/suggestions/${id}`,
         }));
         // Notify the constituent who filed this suggestion about the new update
         if (sRec2?.constituent_user_id) {
-          notifyUser(sRec2.constituent_user_id, {
-            title: `New update on your Suggestion ${sRec2.reference_no || `#${id}`}`,
-            message: `"${title}" — the team has added a new update to your suggestion.`,
-            type: 'message', module: 'Suggestions',
-            record_ref: sRec2.reference_no || null,
-            link_path: `/mla-connect/submissions/${id}`,
-          });
+            notifyUser(sRec2.constituent_user_id, {
+                title: `New update on your Suggestion ${sRec2.reference_no || `#${id}`}`,
+                message: `"${title}" — the team has added a new update to your suggestion.`,
+                type: 'message', module: 'Suggestions',
+                record_ref: sRec2.reference_no || null,
+                link_path: `/mla-connect/submissions/${id}`,
+            });
         }
 
         // Fire-and-forget: SMS/Email follow-up if admin chose to notify complainant
@@ -803,7 +835,7 @@ export const addSuggestionUpdate = async (req, res) => {
             let channels = [];
             try {
                 if (notify_channels) channels = JSON.parse(notify_channels);
-            } catch (e) {}
+            } catch (e) { }
 
             const [[rec]] = await pool.query(
                 'SELECT complainant_name, email, phone, reference_no, COALESCE(date_filed, created_at) AS date_filed FROM suggestions WHERE id = ?', [id]
@@ -889,8 +921,8 @@ export const editSuggestionUpdate = async (req, res) => {
 
         let retainedMedia = [];
         let retainedAttachments = [];
-        try { if (retained_media_ids) retainedMedia = JSON.parse(retained_media_ids); } catch(e){}
-        try { if (retained_attachment_ids) retainedAttachments = JSON.parse(retained_attachment_ids); } catch(e){}
+        try { if (retained_media_ids) retainedMedia = JSON.parse(retained_media_ids); } catch (e) { }
+        try { if (retained_attachment_ids) retainedAttachments = JSON.parse(retained_attachment_ids); } catch (e) { }
 
         const [currentMedia] = await pool.query('SELECT id, file_url FROM suggestion_media WHERE update_id = ?', [updateId]);
         const mediaToDelete = currentMedia.filter(m => !retainedMedia.includes(m.id));
@@ -928,7 +960,7 @@ export const editSuggestionUpdate = async (req, res) => {
                 [rows]
             );
         }
-        
+
         await logActivity(id, `An update was edited: ${title}`, req.admin?.id);
         auditLog(req, { action: 'Updated', module: 'Suggestions', details: `Edited update on Suggestion ID ${id}`, resource: `suggestions/${id}`, severity: 'info' });
 
@@ -1060,11 +1092,11 @@ export const addSuggestionTeamMember = async (req, res) => {
             auditLog(req, { action: 'Updated', module: 'Suggestions', details: `Added team member "${adminUser.full_name}" to Suggestion ID ${id}`, resource: `suggestions/${id}`, severity: 'info' });
             const [[sRef]] = await pool.query('SELECT reference_no FROM suggestions WHERE id = ?', [id]);
             createNotification(admin_user_id, {
-              title: `You've been assigned to Suggestion ${sRef?.reference_no || `#${id}`}`,
-              message: role_label ? `Role: ${role_label}` : 'You have been added to the suggestion team.',
-              type: 'alert', module: 'Suggestions',
-              record_id: Number(id), record_ref: sRef?.reference_no || null,
-              link_path: `/mlaconnect/suggestions/${id}`,
+                title: `You've been assigned to Suggestion ${sRef?.reference_no || `#${id}`}`,
+                message: role_label ? `Role: ${role_label}` : 'You have been added to the suggestion team.',
+                type: 'alert', module: 'Suggestions',
+                record_id: Number(id), record_ref: sRef?.reference_no || null,
+                link_path: `/mlaconnect/suggestions/${id}`,
             });
             const [[row]] = await pool.query(`
                 SELECT it.id, it.role_label, it.created_at,
@@ -1101,10 +1133,10 @@ export const removeSuggestionTeamMember = async (req, res) => {
         await logActivity(id, `Team member "${row.full_name}" removed.`, req.admin?.id);
         auditLog(req, { action: 'Updated', module: 'Suggestions', details: `Removed team member "${row.full_name}" from Suggestion ID ${id}`, resource: `suggestions/${id}`, severity: 'warning' });
         if (sRemovedMember) createNotification(sRemovedMember.admin_user_id, {
-          title: `Removed from Suggestion #${id}`,
-          message: 'You have been removed from the suggestion team.',
-          type: 'info', module: 'Suggestions', record_id: Number(id),
-          link_path: `/mlaconnect/suggestions/${id}`,
+            title: `Removed from Suggestion #${id}`,
+            message: 'You have been removed from the suggestion team.',
+            type: 'info', module: 'Suggestions', record_id: Number(id),
+            link_path: `/mlaconnect/suggestions/${id}`,
         });
         res.json({ success: true, message: 'Team member removed.' });
     } catch (err) {

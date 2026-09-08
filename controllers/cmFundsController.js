@@ -289,6 +289,13 @@ export const listRequests = async (req, res) => {
       queryParams.push(cats, cats);
     }
 
+    const rawSubcategory = req.query.subcategory || req.query.sub_category;
+    if (rawSubcategory && rawSubcategory !== 'All') {
+      const subcats = rawSubcategory.split(',');
+      baseQuery += ` AND r.sub_category IN (?)`;
+      queryParams.push(subcats);
+    }
+
     const rawLocalBody = local_body_id || localBody;
     if (rawLocalBody && rawLocalBody !== 'All') {
       const lbs = rawLocalBody.split(',');

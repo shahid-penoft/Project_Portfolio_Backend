@@ -11,7 +11,7 @@ const CATEGORIES = ['membership', 'local issues', 'submit ideas', 'submit opinio
 //  POST /api/contact  — Public (no auth required)
 // ─────────────────────────────────────────────────────────────
 export const submitContact = async (req, res) => {
-    const { full_name, mobile, email, panchayat_id, category, subject, message } = req.body;
+    const { full_name, mobile, email, panchayat_id, local_body_id, ward_id, ward, category, subject, message } = req.body;
 
     if (!full_name?.trim() || !mobile?.trim() || !message?.trim()) {
         return errorResponse(res, 'full_name, mobile, and message are required.', 400);
@@ -20,16 +20,20 @@ export const submitContact = async (req, res) => {
         return errorResponse(res, `Invalid category. Must be one of: ${CATEGORIES.join(', ')}.`, 400);
     }
 
+    const resolvedPanchayatId = panchayat_id || local_body_id || null;
+    const resolvedWardId = ward_id || ward || null;
+
     try {
         const [result] = await pool.query(
             `INSERT INTO contact_enquiries
-             (full_name, mobile, email, panchayat_id, category, subject, message, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+             (full_name, mobile, email, panchayat_id, ward_id, category, subject, message, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 full_name.trim(),
                 mobile.trim(),
                 email?.trim() || null,
-                panchayat_id || null,
+                resolvedPanchayatId,
+                resolvedWardId,
                 category?.toLowerCase() || 'general',
                 subject?.trim() || null,
                 message.trim(),
@@ -41,8 +45,8 @@ export const submitContact = async (req, res) => {
 
         // Fetch panchayat name for use in emails
         let panchayatName = 'N/A';
-        if (panchayat_id) {
-            const [[lb]] = await pool.query('SELECT name FROM local_bodies WHERE id = ?', [panchayat_id]);
+        if (resolvedPanchayatId) {
+            const [[lb]] = await pool.query('SELECT name FROM local_bodies WHERE id = ?', [resolvedPanchayatId]);
             if (lb) panchayatName = lb.name;
         }
 
@@ -179,6 +183,11 @@ export const getEnquiries = async (req, res) => {
             where += ' AND c.panchayat_id = ?';
             params.push(panchayat_id);
         }
+        const wardId = req.query.ward_id || req.query.ward;
+        if (wardId && wardId !== 'all') {
+            where += ' AND c.ward_id = ?';
+            params.push(wardId);
+        }
 
         // Dynamic Custom Field Filters: cf_{fieldId}={value}
         Object.keys(req.query).forEach(key => {
@@ -200,9 +209,15 @@ export const getEnquiries = async (req, res) => {
         );
 
         const [rows] = await pool.query(
-            `SELECT c.*, lb.name AS panchayat_name
+            `SELECT c.*, 
+                    lb.name AS panchayat_name,
+                    lb.name AS local_body_name,
+                    w.ward_no AS ward_no,
+                    w.place_name AS ward_place_name,
+                    IFNULL(w.place_name, IF(w.ward_no IS NOT NULL, CONCAT('Ward ', w.ward_no), NULL)) AS ward_name
              FROM contact_enquiries c
              LEFT JOIN local_bodies lb ON lb.id = c.panchayat_id
+             LEFT JOIN local_body_wards w ON w.id = c.ward_id
              ${where}
              ORDER BY c.created_at DESC
              LIMIT ? OFFSET ?`,
@@ -249,9 +264,15 @@ export const getEnquiries = async (req, res) => {
 export const getEnquiryById = async (req, res) => {
     try {
         const [[row]] = await pool.query(
-            `SELECT c.*, lb.name AS panchayat_name
+            `SELECT c.*, 
+                    lb.name AS panchayat_name,
+                    lb.name AS local_body_name,
+                    w.ward_no AS ward_no,
+                    w.place_name AS ward_place_name,
+                    IFNULL(w.place_name, IF(w.ward_no IS NOT NULL, CONCAT('Ward ', w.ward_no), NULL)) AS ward_name
              FROM contact_enquiries c
              LEFT JOIN local_bodies lb ON lb.id = c.panchayat_id
+             LEFT JOIN local_body_wards w ON w.id = c.ward_id
              WHERE c.id = ?`,
             [req.params.id]
         );

@@ -9,7 +9,7 @@ export const getWardsByLocalBody = async (req, res) => {
 
         if (!page || !limit) {
             const [rows] = await db.query(
-                'SELECT * FROM local_body_wards WHERE local_body_id = ? ORDER BY ward_no ASC',
+                'SELECT * FROM local_body_wards WHERE local_body_id = ? ORDER BY CAST(ward_no AS UNSIGNED) ASC, ward_no ASC',
                 [localBodyId]
             );
             return successResponse(res, { data: rows }, 'Wards fetched successfully.');
@@ -137,6 +137,17 @@ export const getWardsByLocalBodyName = async (req, res) => {
             return errorResponse(res, 'Local body not found by name.', 404);
         }
         const localBodyId = lbRows[0].id;
+
+        if (!page || !limit) {
+            const [rows] = await db.query(
+                'SELECT * FROM local_body_wards WHERE local_body_id = ? ORDER BY CAST(ward_no AS UNSIGNED) ASC, ward_no ASC',
+                [localBodyId]
+            );
+            return successResponse(res, {
+                data: rows,
+                local_body: { id: localBodyId, name }
+            }, 'Wards fetched successfully by local body name.');
+        }
 
         // 2. Reuse pagination logic (or copy for simplicity here)
         const pageNum = parseInt(page, 10) || 1;

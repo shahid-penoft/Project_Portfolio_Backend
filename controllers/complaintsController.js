@@ -496,8 +496,8 @@ export const getComplaints = async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 export const getComplaintStats = async (req, res) => {
     try {
-        const [statusRows] = await pool.query(`SELECT status, COUNT(*) as count FROM complaints GROUP BY status`);
-        const [[{ total }]] = await pool.query(`SELECT COUNT(*) as total FROM complaints`);
+        const [statusRows] = await pool.query(`SELECT status, COUNT(*) as count FROM complaints WHERE is_deleted = 0 GROUP BY status`);
+        const [[{ total }]] = await pool.query(`SELECT COUNT(*) as total FROM complaints WHERE is_deleted = 0`);
         const stats = { total };
         statusRows.forEach(row => { stats[row.status] = row.count });
         res.json({ success: true, data: stats });
@@ -568,7 +568,7 @@ export const createComplaint = async (req, res) => {
         `, [
             reference_no,
             title,
-            category || await getDropdownDefault('system_category') || 'Other',
+            category || null,
             priority || await getDropdownDefault('complaint_priority') || 'Medium',
             initialStatus,
             description || null,

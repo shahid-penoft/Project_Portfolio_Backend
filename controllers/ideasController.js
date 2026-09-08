@@ -400,8 +400,8 @@ export const getIdeas = async (req, res) => {
 
 export const getIdeaStats = async (req, res) => {
     try {
-        const [statusRows] = await pool.query(`SELECT status, COUNT(*) as count FROM ideas GROUP BY status`);
-        const [[{ total }]] = await pool.query(`SELECT COUNT(*) as total FROM ideas`);
+        const [statusRows] = await pool.query(`SELECT status, COUNT(*) as count FROM ideas WHERE is_deleted = 0 GROUP BY status`);
+        const [[{ total }]] = await pool.query(`SELECT COUNT(*) as total FROM ideas WHERE is_deleted = 0`);
         const stats = { total };
         statusRows.forEach(row => { stats[row.status] = row.count });
         res.json({ success: true, data: stats });
@@ -465,7 +465,7 @@ export const createIdea = async (req, res) => {
         `, [
             reference_no,
             title,
-            category || await getDropdownDefault('system_category') || 'Other',
+            category || null,
             priority || await getDropdownDefault('idea_priority') || 'Medium',
             initialStatus,
             description || null,
