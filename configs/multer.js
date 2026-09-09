@@ -59,7 +59,11 @@ export const uploadImage = multer({
     storage,
     fileFilter,
     limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
-}).single('file');
+}).fields([
+    { name: 'image', maxCount: 1 },
+    { name: 'file', maxCount: 1 },
+    { name: 'photo', maxCount: 1 },
+]);
 
 export const uploadVideo = multer({
     storage,
@@ -123,6 +127,15 @@ export const runMulter = (multerFn, req, res) =>
     new Promise((resolve, reject) =>
         multerFn(req, res, (err) => {
             if (!req.body) req.body = {};
+            if (!err) {
+                if (!req.file && req.files) {
+                    if (Array.isArray(req.files)) {
+                        req.file = req.files[0];
+                    } else if (typeof req.files === 'object') {
+                        req.file = req.files.image?.[0] || req.files.file?.[0] || req.files.photo?.[0] || Object.values(req.files).flat()[0];
+                    }
+                }
+            }
             return err ? reject(err) : resolve();
         })
     );

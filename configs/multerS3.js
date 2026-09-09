@@ -65,7 +65,11 @@ export const uploadImage = multer({
     storage: multerS3(s3StorageOptions('images')),
     fileFilter,
     limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
-}).single('file');
+}).fields([
+    { name: 'image', maxCount: 1 },
+    { name: 'file', maxCount: 1 },
+    { name: 'photo', maxCount: 1 },
+]);
 
 export const uploadVideo = multer({
     storage: multerS3(s3StorageOptions('videos')),
@@ -280,7 +284,16 @@ export const runMulter = (multerFn, req, res) =>
     new Promise((resolve, reject) =>
         multerFn(req, res, (err) => {
             if (!req.body) req.body = {};
-            if (!err) transformFileLocations(req);
+            if (!err) {
+                if (!req.file && req.files) {
+                    if (Array.isArray(req.files)) {
+                        req.file = req.files[0];
+                    } else if (typeof req.files === 'object') {
+                        req.file = req.files.image?.[0] || req.files.file?.[0] || req.files.photo?.[0] || Object.values(req.files).flat()[0];
+                    }
+                }
+                transformFileLocations(req);
+            }
             return err ? reject(err) : resolve();
         })
     );
