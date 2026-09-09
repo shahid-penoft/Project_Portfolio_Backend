@@ -1,5 +1,5 @@
 import 'dotenv/config';
-// Backend API Server - Track petition updates refined
+// Backend API Server - Blood requests reload trigger
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';

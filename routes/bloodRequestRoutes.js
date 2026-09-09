@@ -7,7 +7,7 @@ import {
     deleteBloodRequest,
 } from '../controllers/bloodRequestController.js';
 import { validateBloodRequest } from '../middlewares/validateBloodRequest.js';
-import { verifyToken } from '../middlewares/auth.js';
+import { verifyToken, optionalVerifyToken } from '../middlewares/auth.js';
 
 const router = express.Router();
 
@@ -23,8 +23,8 @@ const requestLimiter = rateLimit({
     },
 });
 
-// GET /api/blood-requests — public, supports ?status= and ?blood_group=
-router.get('/', getBloodRequests);
+// GET /api/blood-requests — public / admin with optional token
+router.get('/', optionalVerifyToken, getBloodRequests);
 
 // POST /api/blood-requests — public (rate-limited) + validated
 router.post('/', requestLimiter, validateBloodRequest, addBloodRequest);

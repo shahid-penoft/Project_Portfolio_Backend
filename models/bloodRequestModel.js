@@ -1,10 +1,87 @@
 import pool from '../configs/db.js';
 
 /**
- * Fetch all blood requests with optional status/blood_group filters.
+ * Fetch blood requests with optional status, blood group, search, local body, sort, and pagination.
  */
-export const fetchAllBloodRequests = async ({ status, bloodGroup } = {}) => {
-    let sql = `
+export const fetchAllBloodRequests = async ({
+    status,
+    bloodGroup,
+    search,
+    localBody,
+    localBodyId,
+    sort,
+    page = 1,
+    limit,
+} = {}) => {
+    const whereConditions = ['br.is_active = 1'];
+    const params = [];
+
+    // Status filter
+    if (status && status !== 'All') {
+        whereConditions.push('br.status = ?');
+        params.push(status);
+    }
+
+    // Blood group filter (handle url decoded '+' as space e.g. 'B ' -> 'B+')
+    let normGroup = (bloodGroup || '').toUpperCase().trim();
+    if (['A', 'B', 'AB', 'O'].includes(normGroup)) {
+        normGroup += '+';
+    }
+    if (normGroup && normGroup !== 'ALL') {
+        whereConditions.push('br.blood_group = ?');
+        params.push(normGroup);
+    }
+
+    // Local body ID or name filter
+    if (localBodyId) {
+        whereConditions.push('br.local_body_id = ?');
+        params.push(parseInt(localBodyId, 10));
+    } else if (localBody && localBody !== 'All') {
+        whereConditions.push('(lb.name = ? OR lb.name LIKE ?)');
+        params.push(localBody, `%${localBody}%`);
+    }
+
+    // Search query
+    if (search && search.trim()) {
+        const q = `%${search.trim()}%`;
+        whereConditions.push(`(
+            br.patient_name LIKE ? OR
+            br.contact_phone LIKE ? OR
+            br.contact_person LIKE ? OR
+            br.hospital_name LIKE ? OR
+            br.department LIKE ? OR
+            br.house_name LIKE ? OR
+            br.ward_info LIKE ? OR
+            br.notes LIKE ? OR
+            lb.name LIKE ?
+        )`);
+        params.push(q, q, q, q, q, q, q, q, q);
+    }
+
+    const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
+
+    // Count total matching items
+    const countSql = `
+        SELECT COUNT(*) AS total
+        FROM blood_requests br
+        LEFT JOIN local_bodies lb ON br.local_body_id = lb.id
+        ${whereClause}
+    `;
+    const [[{ total }]] = await pool.query(countSql, params);
+
+    // Sorting
+    let orderBy = 'br.created_at DESC';
+    const s = (sort || '').toLowerCase();
+    if (s.includes('oldest') || s === 'asc') {
+        orderBy = 'br.created_at ASC';
+    } else if (s.includes('name a-z') || s === 'name_asc') {
+        orderBy = 'br.patient_name ASC';
+    } else if (s.includes('name z-a') || s === 'name_desc') {
+        orderBy = 'br.patient_name DESC';
+    }
+
+    // Build data SQL
+    let dataSql = `
         SELECT
             br.id,
             br.patient_name   AS patientName,
@@ -26,26 +103,27 @@ export const fetchAllBloodRequests = async ({ status, bloodGroup } = {}) => {
             br.created_at     AS createdAt
         FROM blood_requests br
         LEFT JOIN local_bodies lb ON br.local_body_id = lb.id
-        WHERE br.is_active = 1
+        ${whereClause}
+        ORDER BY ${orderBy}
     `;
-    const params = [];
 
-    if (status && status !== 'All') {
-        sql += ` AND br.status = ?`;
-        params.push(status);
+    const queryParams = [...params];
+
+    // Pagination
+    let parsedLimit = null;
+    let parsedPage = parseInt(page, 10) || 1;
+    if (parsedPage < 1) parsedPage = 1;
+
+    if (limit && limit !== 'all') {
+        parsedLimit = parseInt(limit, 10) || 10;
+        const offset = (parsedPage - 1) * parsedLimit;
+        dataSql += ` LIMIT ? OFFSET ?`;
+        queryParams.push(parsedLimit, offset);
     }
 
-    const normGroup = (bloodGroup || '').trim().toUpperCase();
-    if (normGroup && normGroup !== 'ALL') {
-        sql += ` AND br.blood_group = ?`;
-        params.push(normGroup);
-    }
+    const [rows] = await pool.query(dataSql, queryParams);
 
-    sql += ` ORDER BY br.created_at DESC`;
-
-    const [rows] = await pool.query(sql, params);
-
-    return rows.map((r) => ({
+    const formattedData = rows.map((r) => ({
         ...r,
         unitsNeeded: Number(r.unitsNeeded) || parseInt(r.unitsNeeded, 10) || r.unitsNeeded,
         requiredDate: r.requiredDate
@@ -54,6 +132,59 @@ export const fetchAllBloodRequests = async ({ status, bloodGroup } = {}) => {
                 : String(r.requiredDate).split('T')[0])
             : null,
     }));
+
+    // Status counts
+    const [statusRows] = await pool.query(`
+        SELECT status, COUNT(*) AS count
+        FROM blood_requests
+        WHERE is_active = 1
+        GROUP BY status
+    `);
+    const statusCounts = { All: 0, Active: 0, Pending: 0, Fulfilled: 0 };
+    for (const r of statusRows) {
+        statusCounts[r.status] = Number(r.count);
+        statusCounts.All += Number(r.count);
+    }
+
+    // Blood group counts (filtered by current status if provided)
+    let bgSql = `SELECT blood_group AS bloodGroup, COUNT(*) AS count FROM blood_requests WHERE is_active = 1`;
+    const bgParams = [];
+    if (status && status !== 'All') {
+        bgSql += ` AND status = ?`;
+        bgParams.push(status);
+    }
+    bgSql += ` GROUP BY blood_group`;
+    const [bgRows] = await pool.query(bgSql, bgParams);
+
+    const bloodGroupCounts = {
+        All: 0,
+        'O+': 0, 'O-': 0,
+        'A+': 0, 'A-': 0,
+        'B+': 0, 'B-': 0,
+        'AB+': 0, 'AB-': 0,
+    };
+    for (const r of bgRows) {
+        if (r.bloodGroup && bloodGroupCounts[r.bloodGroup] !== undefined) {
+            bloodGroupCounts[r.bloodGroup] = Number(r.count);
+        }
+        bloodGroupCounts.All += Number(r.count);
+    }
+
+    const totalPages = parsedLimit ? Math.ceil(total / parsedLimit) : 1;
+
+    return {
+        data: formattedData,
+        pagination: {
+            total: Number(total),
+            page: parsedPage,
+            limit: parsedLimit || total,
+            totalPages: totalPages || 1,
+        },
+        counts: {
+            statusCounts,
+            bloodGroupCounts,
+        },
+    };
 };
 
 /**

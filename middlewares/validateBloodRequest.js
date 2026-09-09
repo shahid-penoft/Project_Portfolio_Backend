@@ -37,11 +37,6 @@ export const validateBloodRequest = (req, res, next) => {
         }
     }
 
-    // ── localBodyId (required) ────────────────────────────────────────────────
-    if (!body.localBodyId) {
-        errors.push('localBodyId is required.');
-    }
-
     if (errors.length > 0) {
         return res.status(422).json({
             success: false,
@@ -59,13 +54,13 @@ export const validateBloodRequest = (req, res, next) => {
         department: body.department ? String(body.department).trim().slice(0, 100) : null,
         hospitalLocation: body.hospitalLocation ? String(body.hospitalLocation).trim().slice(0, 2000) : null,
         houseName: body.houseName ? String(body.houseName).trim().slice(0, 200) : null,
-        localBodyId: parseInt(body.localBodyId, 10) || null,
-        wardId: body.wardId ? parseInt(body.wardId, 10) : null,
+        localBodyId: body.localBodyId ? (parseInt(body.localBodyId, 10) || null) : null,
+        wardId: body.wardId ? (parseInt(body.wardId, 10) || null) : null,
         contactPerson: body.contactPerson ? String(body.contactPerson).trim().slice(0, 100) : null,
         contactPhone: String(body.contactPhone).trim().slice(0, 20),
         requiredDate: body.requiredDate,
         notes: body.notes ? String(body.notes).trim().slice(0, 2000) : null,
-        status: VALID_STATUSES.includes(body.status) ? body.status : 'Pending',
+        status: VALID_STATUSES.includes(body.status) ? body.status : 'Active',
     };
 
     next();

@@ -7,7 +7,7 @@ import {
 
 /**
  * GET /api/blood-requests
- * Supports optional query params: ?status=Active&blood_group=O+
+ * Supports query params: ?status=Active&bloodGroup=O+&search=...&localBody=...&sort=...&page=1&limit=10
  */
 export const getBloodRequests = async (req, res) => {
     try {
@@ -19,13 +19,30 @@ export const getBloodRequests = async (req, res) => {
             status = '';
         }
 
-        const bloodGroup = (req.query.blood_group || req.query.group || '').trim().toUpperCase();
+        const bloodGroup = (req.query.bloodGroup || req.query.blood_group || req.query.group || '').trim().toUpperCase();
+        const search = req.query.search || req.query.q || '';
+        const localBody = req.query.localBody || req.query.panchayat || '';
+        const localBodyId = req.query.localBodyId || req.query.local_body_id || '';
+        const sort = req.query.sort || req.query.sortBy || '';
+        const page = req.query.page;
+        const limit = req.query.limit;
 
-        const requests = await fetchAllBloodRequests({ status, bloodGroup });
+        const result = await fetchAllBloodRequests({
+            status,
+            bloodGroup,
+            search,
+            localBody,
+            localBodyId,
+            sort,
+            page,
+            limit,
+        });
 
         return res.json({
             success: true,
-            data: requests,
+            data: result.data,
+            pagination: result.pagination,
+            counts: result.counts,
         });
     } catch (err) {
         console.error('[getBloodRequests error]:', err);
