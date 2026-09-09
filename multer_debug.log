@@ -577,3 +577,10 @@ fileFilter called for: test-image.png mimetype: image/png
 fileFilter called for: test-image.png mimetype: image/png
 fileFilter called for: test-photo.png mimetype: image/png
 fileFilter called for: blob mimetype: image/jpeg
+fileFilter called for: blob mimetype: image/jpeg
+fileFilter called for: blob mimetype: image/jpeg
+fileFilter called for: blob mimetype: image/jpeg
+fileFilter called for: blob mimetype: image/jpeg
+fileFilter called for: Penoft Documentation - Aadhaar OTP Request API 1.5 (1).pdf mimetype: application/pdf
+fileFilter called for: Penoft Documentation - Aadhaar OTP Request API 1.5 (1).pdf mimetype: application/pdf
+fileFilter called for: Penoft Documentation - Aadhaar OTP Request API 1.5 (1).pdf mimetype: application/octet-stream
