@@ -293,7 +293,12 @@ export const getComplaints = async (req, res) => {
             params.push(req.constituent.id);
         }
 
-        if (status) { conditions.push('c.status = ?'); params.push(status); }
+        if (status) {
+            conditions.push('c.status = ?');
+            params.push(status);
+        } else if (trash !== 'true') {
+            conditions.push("c.status != 'Draft'");
+        }
         if (category) { conditions.push('c.category = ?'); params.push(category); }
         if (department) { conditions.push('c.department LIKE ?'); params.push('%' + department + '%'); }
         if (priority) { conditions.push('c.priority = ?'); params.push(priority); }
@@ -372,11 +377,11 @@ export const getComplaints = async (req, res) => {
         // Follow-up Marked (within N days)
         if (followup_marked) {
             if (followup_marked === 'Never Sent') {
-                conditions.push("NOT EXISTS (SELECT 1 FROM complaint_updates cu WHERE cu.complaint_id = c.id AND cu.type = 'Follow-up' LIMIT 1)");
+                conditions.push("NOT EXISTS (SELECT 1 FROM complaint_updates cu WHERE cu.complaint_id = c.id AND (cu.type = 'Follow-up' OR cu.comm_channel IS NOT NULL) LIMIT 1)");
             } else {
                 const days = parseDayLabel(followup_marked);
                 if (days) {
-                    conditions.push("EXISTS (SELECT 1 FROM complaint_updates cu WHERE cu.complaint_id = c.id AND cu.type = 'Follow-up' AND cu.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 1)");
+                    conditions.push("EXISTS (SELECT 1 FROM complaint_updates cu WHERE cu.complaint_id = c.id AND (cu.type = 'Follow-up' OR cu.comm_channel IS NOT NULL) AND cu.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 1)");
                     params.push(days);
                 }
             }
@@ -496,8 +501,8 @@ export const getComplaints = async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 export const getComplaintStats = async (req, res) => {
     try {
-        const [statusRows] = await pool.query(`SELECT status, COUNT(*) as count FROM complaints WHERE is_deleted = 0 GROUP BY status`);
-        const [[{ total }]] = await pool.query(`SELECT COUNT(*) as total FROM complaints WHERE is_deleted = 0`);
+        const [statusRows] = await pool.query(`SELECT status, COUNT(*) as count FROM complaints WHERE is_deleted = 0 AND status != 'Draft' GROUP BY status`);
+        const [[{ total }]] = await pool.query(`SELECT COUNT(*) as total FROM complaints WHERE is_deleted = 0 AND status != 'Draft'`);
         const stats = { total };
         statusRows.forEach(row => { stats[row.status] = row.count });
         res.json({ success: true, data: stats });
@@ -595,20 +600,6 @@ export const createComplaint = async (req, res) => {
         await logActivity(newId, `Complaint "${title}" filed. Reference: ${reference_no}`, req.admin?.id);
         auditLog(req, { action: 'Created', module: 'Complaints', details: `Complaint filed — "${title}" (${reference_no})`, resource: `complaints/${newId}`, severity: 'info' });
 
-        // Auto-insert timeline update.
-        // - Public/constituent submission → auto-insert "We are reviewing your submission."
-        // - Admin creation with status_details → insert custom text
-        // - Admin creation without status_details → insert nothing (no regression)
-        const sdTrimmed = status_details?.trim();
-        const updateTitle = sdTrimmed || (isAdminCreation ? null : 'We are reviewing your submission.');
-        const updateNote  = sdTrimmed || (isAdminCreation ? null : `Your complaint has been registered and is under initial review by the MLA Office.\n\nComplainant: ${complainant_name}\nTracking ID: ${reference_no}`);
-        if (updateTitle) {
-            await pool.query(
-                `INSERT INTO complaint_updates (complaint_id, type, title, note, admin_user_id, created_at) VALUES (?, 'Status Update', ?, ?, ?, NOW())`,
-                [newId, updateTitle, updateNote, adminId]
-            );
-        }
-
         // Notify all admins about new complaint
         broadcastNotification({
           title: `New Complaint ${reference_no}`,
@@ -627,6 +618,11 @@ export const createComplaint = async (req, res) => {
         const isLegacyNotify = notify_complainant === true || notify_complainant === 'true';
         const shouldSendSMS = channels.includes('sms') || isLegacyNotify;
         const shouldSendEmail = channels.includes('email') || isLegacyNotify;
+
+        let didSendSms = false;
+        let didSendEmail = false;
+        let finalSms = null;
+        let finalEmail = null;
 
         if (shouldSendSMS && phone && phone.trim()) {
             let smsBody = custom_sms_message?.trim() || submissionConfirmationSMS({
@@ -647,13 +643,8 @@ export const createComplaint = async (req, res) => {
                 .replace(/^Hi Citizen /m, `Hi ${complainant_name} `);
 
             sendSMSSafe(phone.trim(), smsBody);
-            
-            // Log SMS communication
-            const commAdminId = adminId;
-            await pool.query(
-                `INSERT INTO communications_logs (entity_type, entity_id, channel, recipient, message, admin_user_id) VALUES (?, ?, ?, ?, ?, ?)`,
-                ['Complaint', newId, 'SMS', phone.trim(), smsBody, commAdminId]
-            ).catch(err => console.warn('[Log failed]', err.message));
+            didSendSms = true;
+            finalSms = smsBody;
         }
 
         if (shouldSendEmail && email && email.trim()) {
@@ -674,11 +665,52 @@ export const createComplaint = async (req, res) => {
                 message: emailBody,
             }).catch(err => console.error('[createComplaint:email]', err.message));
 
-            // Log Email communication
-            const commAdminId = adminId;
+            didSendEmail = true;
+            finalEmail = emailBody;
+        }
+
+        // Auto-insert timeline / follow-up entry
+        const sdTrimmed = status_details?.trim();
+        let commUpdateId = null;
+
+        if (didSendSms || didSendEmail) {
+            const commChannel = (didSendSms && didSendEmail) ? 'both' : (didSendSms ? 'sms' : 'email');
+            const followUpTitle = sdTrimmed || 'Initial Acknowledgment';
+            // Follow-up note: actual message sent
+            const followUpNote = finalSms || finalEmail;
+
+            const [commUpRes] = await pool.query(
+                `INSERT INTO complaint_updates 
+                 (complaint_id, type, title, note, admin_user_id, comm_channel, comm_sent_at, sms_sent, sms_body, email_sent, email_body, hide_from_public, created_at)
+                 VALUES (?, 'Follow-up', ?, ?, ?, ?, NOW(), ?, ?, ?, ?, 0, NOW())`,
+                [newId, followUpTitle, followUpNote, adminId, commChannel, didSendSms ? 1 : 0, finalSms, didSendEmail ? 1 : 0, finalEmail]
+            );
+            commUpdateId = commUpRes.insertId;
+        } else {
+            // No communication sent; check if standard timeline update should be created
+            const updateTitle = sdTrimmed || (isAdminCreation ? null : 'We are reviewing your submission.');
+            const updateNote  = sdTrimmed || (isAdminCreation ? null : `Your complaint has been registered and is under initial review by the MLA Office.\n\nComplainant: ${complainant_name}\nTracking ID: ${reference_no}`);
+            if (updateTitle) {
+                await pool.query(
+                    `INSERT INTO complaint_updates (complaint_id, type, title, note, admin_user_id, created_at) VALUES (?, 'Status Update', ?, ?, ?, NOW())`,
+                    [newId, updateTitle, updateNote, adminId]
+                );
+            }
+        }
+
+        // Log communications to communications_logs with update_id linked
+        const commAdminId = adminId;
+        if (didSendSms) {
             await pool.query(
-                `INSERT INTO communications_logs (entity_type, entity_id, channel, recipient, message, admin_user_id) VALUES (?, ?, ?, ?, ?, ?)`,
-                ['Complaint', newId, 'Email', email.trim(), emailBody, commAdminId]
+                `INSERT INTO communications_logs (entity_type, entity_id, channel, recipient, message, admin_user_id, update_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                ['Complaint', newId, 'SMS', phone.trim(), finalSms, commAdminId, commUpdateId]
+            ).catch(err => console.warn('[Log failed]', err.message));
+        }
+
+        if (didSendEmail) {
+            await pool.query(
+                `INSERT INTO communications_logs (entity_type, entity_id, channel, recipient, message, admin_user_id, update_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                ['Complaint', newId, 'Email', email.trim(), finalEmail, commAdminId, commUpdateId]
             ).catch(err => console.warn('[Log failed]', err.message));
         }
 
@@ -701,6 +733,7 @@ export const updateComplaint = async (req, res) => {
             complainant_name, phone, alternative_phone, email,
             local_body_id, ward_id, department, date_filed,
             status_details,
+            notify_complainant, notify_channels, custom_sms_message, custom_email_message
         } = req.body;
 
         const internal_note = req.body.internal_note !== undefined 
@@ -740,13 +773,103 @@ export const updateComplaint = async (req, res) => {
         if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'Complaint not found.' });
         await logActivity(id, `Complaint details updated by admin.`, req.admin?.id);
         auditLog(req, { action: 'Updated', module: 'Complaints', details: `Complaint ID ${id} details updated`, resource: `complaints/${id}`, severity: 'success' });
-        // If admin provided status_details, insert it as a new timeline entry
-        if (status_details?.trim()) {
+
+        // Check if communication notification was requested
+        const isNotify = notify_complainant === true || notify_complainant === 'true';
+        let didSendSms = false;
+        let didSendEmail = false;
+        let finalSms = null;
+        let finalEmail = null;
+
+        if (isNotify) {
+            const [[currentComplaint]] = await pool.query('SELECT complainant_name, phone, email, reference_no, date_filed FROM complaints WHERE id = ?', [id]);
+            const targetPhone = (phone || currentComplaint?.phone || '').trim();
+            const targetEmail = (email || currentComplaint?.email || '').trim();
+            const targetName = complainant_name || currentComplaint?.complainant_name || 'Citizen';
+            const refNo = currentComplaint?.reference_no || `C-${id}`;
+            const dateStr = new Date(date_filed || currentComplaint?.date_filed || Date.now()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+            const channels = Array.isArray(notify_channels)
+                ? notify_channels
+                : (typeof notify_channels === 'string' ? notify_channels.split(',').map(s => s.trim()) : []);
+            const shouldSendSMS = channels.includes('sms') || channels.length === 0;
+            const shouldSendEmail = channels.includes('email') || channels.length === 0;
+
+            if (shouldSendSMS && targetPhone) {
+                let smsBody = custom_sms_message?.trim() || submissionConfirmationSMS({
+                    name: targetName,
+                    dateFiled: date_filed || currentComplaint?.date_filed || new Date().toISOString().split('T')[0],
+                    referenceNo: refNo,
+                    statusDetails: status_details,
+                    moduleLabel: 'Complaint',
+                });
+                smsBody = smsBody
+                    .replace(/\[Pending ID\]/gi, refNo)
+                    .replace(/\[PendingID\]/gi, refNo)
+                    .replace(/{reference_no}/g, refNo)
+                    .replace(/{date}/g, dateStr)
+                    .replace(/{name}/g, targetName)
+                    .replace(/^Hi Citizen,/m, `Hi ${targetName},`)
+                    .replace(/^Hi Citizen /m, `Hi ${targetName} `);
+                sendSMSSafe(targetPhone, smsBody);
+                didSendSms = true;
+                finalSms = smsBody;
+            }
+
+            if (shouldSendEmail && targetEmail) {
+                const reviewMsg = status_details?.trim() || "We are reviewing your submission.";
+                let emailBody = custom_email_message?.trim() || `Hi ${targetName},\n\nComplaint received: ${dateStr}\n${reviewMsg}\nTracking ID: ${refNo}\n\nOffice of Kothamangalam MLA`;
+                emailBody = emailBody
+                    .replace(/\[Pending ID\]/g, refNo)
+                    .replace(/{reference_no}/g, refNo)
+                    .replace(/{date}/g, dateStr)
+                    .replace(/{name}/g, targetName)
+                    .replace(/^Hi Citizen,/m, `Hi ${targetName},`)
+                    .replace(/^Hi Citizen /m, `Hi ${targetName} `);
+                sendNotificationEmail({
+                    to: targetEmail,
+                    subject: `Update on your Complaint [${refNo}]`,
+                    message: emailBody,
+                }).catch(err => console.error('[updateComplaint:email]', err.message));
+                didSendEmail = true;
+                finalEmail = emailBody;
+            }
+        }
+
+        let commUpdateId = null;
+        if (didSendSms || didSendEmail) {
+            const commChannel = (didSendSms && didSendEmail) ? 'both' : (didSendSms ? 'sms' : 'email');
+            const followUpTitle = status_details?.trim() || 'Follow-up Update';
+            const followUpNote = finalSms || finalEmail;
+            const [commUpRes] = await pool.query(
+                `INSERT INTO complaint_updates 
+                 (complaint_id, type, title, note, admin_user_id, comm_channel, comm_sent_at, sms_sent, sms_body, email_sent, email_body, hide_from_public, created_at)
+                 VALUES (?, 'Follow-up', ?, ?, ?, ?, NOW(), ?, ?, ?, ?, 0, NOW())`,
+                [id, followUpTitle, followUpNote, req.admin?.id || null, commChannel, didSendSms ? 1 : 0, finalSms, didSendEmail ? 1 : 0, finalEmail]
+            );
+            commUpdateId = commUpRes.insertId;
+
+            const commAdminId = req.admin?.id || null;
+            if (didSendSms) {
+                await pool.query(
+                    `INSERT INTO communications_logs (entity_type, entity_id, channel, recipient, message, admin_user_id, update_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                    ['Complaint', id, 'SMS', (phone || '').trim(), finalSms, commAdminId, commUpdateId]
+                ).catch(err => console.warn('[Log failed]', err.message));
+            }
+            if (didSendEmail) {
+                await pool.query(
+                    `INSERT INTO communications_logs (entity_type, entity_id, channel, recipient, message, admin_user_id, update_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                    ['Complaint', id, 'Email', (email || '').trim(), finalEmail, commAdminId, commUpdateId]
+                ).catch(err => console.warn('[Log failed]', err.message));
+            }
+        } else if (status_details?.trim()) {
+            // If admin provided status_details without notification, insert as standard timeline entry
             await pool.query(
-                `INSERT INTO complaint_updates (complaint_id, type, title, note) VALUES (?, 'Status Update', ?, ?)`,
-                [id, status_details.trim(), null]
+                `INSERT INTO complaint_updates (complaint_id, type, title, note, admin_user_id, created_at) VALUES (?, 'Status Update', ?, ?, ?, NOW())`,
+                [id, status_details.trim(), null, req.admin?.id || null]
             );
         }
+
         const complaint = await fetchFullComplaint(id);
         res.json({ success: true, message: 'Complaint updated.', data: complaint });
     } catch (err) {

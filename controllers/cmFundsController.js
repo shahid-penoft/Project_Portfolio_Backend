@@ -268,6 +268,8 @@ export const listRequests = async (req, res) => {
         baseQuery += ` AND r.status IN (?)`;
         queryParams.push(statuses);
       }
+    } else if (!isTrash) {
+      baseQuery += ` AND r.status != 'Draft'`;
     }
     if (priority && priority !== 'All') {
       const priorities = priority.split(',');
@@ -512,7 +514,7 @@ export const listRequests = async (req, res) => {
     let statusCountsQuery = `
       SELECT status, COUNT(*) as count 
       FROM cm_fund_requests 
-      WHERE is_deleted = ?
+      WHERE is_deleted = ? AND status != 'Draft'
     `;
     const statusCountsParams = [isTrash ? 1 : 0];
 
@@ -753,7 +755,8 @@ export const createRequest = async (req, res) => {
     });
 
     // Notify Applicant
-    if (b.notify_applicant === 'true' && applicantPhone) {
+    const shouldNotifyApplicant = b.notify_applicant === 'true' || b.notify_applicant === true || b.notify_applicant === 1 || (Array.isArray(b.notify_channels) && b.notify_channels.includes('sms'));
+    if (shouldNotifyApplicant && applicantPhone) {
       let message = b.custom_message;
       if (!message || message.trim() === '') {
         message = submissionConfirmationSMS({
@@ -785,10 +788,24 @@ export const createRequest = async (req, res) => {
         recipientName: applicantName
       });
 
+      // Insert follow-up entry into cm_fund_updates
+      let commUpdateId = null;
+      try {
+        const [upRes] = await connection.query(
+          `INSERT INTO cm_fund_updates 
+           (request_id, type, title, note, notify_complainant, admin_user_id, hide_from_public, comm_channel, comm_sent_at, sms_sent, sms_body, email_sent, email_body, created_at)
+           VALUES (?, 'Follow-up', 'Initial Acknowledgment', ?, 1, ?, 0, 'sms', NOW(), 1, ?, 0, NULL, NOW())`,
+          [appId, message, userId, message]
+        );
+        commUpdateId = upRes.insertId;
+      } catch (e) {
+        console.warn('[cm_fund_updates follow-up failed]', e.message);
+      }
+
       // Log SMS communication
       await pool.query(
-        `INSERT INTO communications_logs (entity_type, entity_id, channel, recipient, message, admin_user_id) VALUES (?, ?, ?, ?, ?, ?)`,
-        ['Application', appId, 'SMS', applicantPhone, message, req.admin?.id || null]
+        `INSERT INTO communications_logs (entity_type, entity_id, channel, recipient, message, admin_user_id, update_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ['Application', appId, 'SMS', applicantPhone, message, req.admin?.id || null, commUpdateId]
       ).catch(err => console.warn('[Log failed]', err.message));
     }
 
@@ -886,7 +903,8 @@ export const createDraftRequest = async (req, res) => {
     }
 
     // Notify Applicant
-    if (b.notify_applicant === 'true' && applicantPhone) {
+    const shouldNotifyApplicant = b.notify_applicant === 'true' || b.notify_applicant === true || b.notify_applicant === 1 || (Array.isArray(b.notify_channels) && b.notify_channels.includes('sms'));
+    if (shouldNotifyApplicant && applicantPhone) {
       let message = b.custom_message;
       if (!message || message.trim() === '') {
         message = submissionConfirmationSMS({
@@ -916,10 +934,24 @@ export const createDraftRequest = async (req, res) => {
         recipientName: applicantName
       });
 
-      // Log SMS communication so it shows in the Communications tab
+      // Insert follow-up entry into cm_fund_updates
+      let commUpdateId = null;
+      try {
+        const [upRes] = await connection.query(
+          `INSERT INTO cm_fund_updates 
+           (request_id, type, title, note, notify_complainant, admin_user_id, hide_from_public, comm_channel, comm_sent_at, sms_sent, sms_body, email_sent, email_body, created_at)
+           VALUES (?, 'Follow-up', 'Initial Acknowledgment', ?, 1, ?, 0, 'sms', NOW(), 1, ?, 0, NULL, NOW())`,
+          [appId, message, userId, message]
+        );
+        commUpdateId = upRes.insertId;
+      } catch (e) {
+        console.warn('[cm_fund_updates follow-up failed in draft]', e.message);
+      }
+
+      // Log SMS communication so it shows in the Communications tab with update_id linked
       await pool.query(
-        `INSERT INTO communications_logs (entity_type, entity_id, channel, recipient, message, admin_user_id) VALUES (?, ?, ?, ?, ?, ?)`,
-        ['Application', appId, 'SMS', applicantPhone, message, req.admin?.id || null]
+        `INSERT INTO communications_logs (entity_type, entity_id, channel, recipient, message, admin_user_id, update_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ['Application', appId, 'SMS', applicantPhone, message, req.admin?.id || null, commUpdateId]
       ).catch(err => console.warn('[createDraftRequest SMS Log failed]', err.message));
     }
 

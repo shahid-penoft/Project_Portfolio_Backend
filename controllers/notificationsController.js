@@ -7,6 +7,106 @@ import pool from '../configs/db.js';
 import { brevoSmsLimiter } from '../services/rateLimiter.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// resolveModulePrefix helper
+// ─────────────────────────────────────────────────────────────────────────────
+const resolveModulePrefix = (typeOrPrefix) => {
+    if (!typeOrPrefix) return null;
+    const s = String(typeOrPrefix).trim();
+    if (['C-', 'P-', 'I-', 'S-', 'F-'].includes(s)) return s;
+    const lower = s.toLowerCase().replace(/[\s_-]/g, '');
+    if (lower.startsWith('complaint')) return 'C-';
+    if (lower.startsWith('issue') || lower.startsWith('publicissue')) return 'P-';
+    if (lower.startsWith('idea')) return 'I-';
+    if (lower.startsWith('suggestion')) return 'S-';
+    if (lower.startsWith('cmfund') || lower.startsWith('application')) return 'F-';
+    return null;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// createFollowUpUpdate helper — inserts into corresponding module update table
+// ─────────────────────────────────────────────────────────────────────────────
+const createFollowUpUpdate = async ({ modulePrefix, entityId, title, note, adminUserId, commChannel, didSendSms, finalSms, didSendEmail, finalEmail }) => {
+    try {
+        if (!modulePrefix || !entityId) return null;
+        let updateId = null;
+
+        if (modulePrefix === 'C-') {
+            const [res] = await pool.query(
+                `INSERT INTO complaint_updates 
+                 (complaint_id, type, title, note, admin_user_id, comm_channel, comm_sent_at, sms_sent, sms_body, email_sent, email_body, hide_from_public, created_at)
+                 VALUES (?, 'Follow-up', ?, ?, ?, ?, NOW(), ?, ?, ?, ?, 0, NOW())`,
+                [entityId, title || 'Communication Sent', note, adminUserId, commChannel, didSendSms ? 1 : 0, finalSms, didSendEmail ? 1 : 0, finalEmail]
+            );
+            updateId = res.insertId;
+        } else if (modulePrefix === 'P-') {
+            const [res] = await pool.query(
+                `INSERT INTO issue_updates 
+                 (issue_id, type, title, note, admin_user_id, comm_channel, comm_sent_at, sms_sent, sms_body, email_sent, email_body, hide_from_public, created_at)
+                 VALUES (?, 'Follow-up', ?, ?, ?, ?, NOW(), ?, ?, ?, ?, 0, NOW())`,
+                [entityId, title || 'Communication Sent', note, adminUserId, commChannel, didSendSms ? 1 : 0, finalSms, didSendEmail ? 1 : 0, finalEmail]
+            );
+            updateId = res.insertId;
+        } else if (modulePrefix === 'I-') {
+            const [res] = await pool.query(
+                `INSERT INTO idea_updates 
+                 (idea_id, type, title, note, admin_user_id, comm_channel, comm_sent_at, sms_sent, sms_body, email_sent, email_body, hide_from_public, created_at)
+                 VALUES (?, 'Follow-up', ?, ?, ?, ?, NOW(), ?, ?, ?, ?, 0, NOW())`,
+                [entityId, title || 'Communication Sent', note, adminUserId, commChannel, didSendSms ? 1 : 0, finalSms, didSendEmail ? 1 : 0, finalEmail]
+            );
+            updateId = res.insertId;
+        } else if (modulePrefix === 'S-') {
+            const [res] = await pool.query(
+                `INSERT INTO suggestion_updates 
+                 (suggestion_id, type, title, note, admin_user_id, comm_channel, comm_sent_at, sms_sent, sms_body, email_sent, email_body, hide_from_public, created_at)
+                 VALUES (?, 'Follow-up', ?, ?, ?, ?, NOW(), ?, ?, ?, ?, 0, NOW())`,
+                [entityId, title || 'Communication Sent', note, adminUserId, commChannel, didSendSms ? 1 : 0, finalSms, didSendEmail ? 1 : 0, finalEmail]
+            );
+            updateId = res.insertId;
+        } else if (modulePrefix === 'F-') {
+            const [res] = await pool.query(
+                `INSERT INTO cm_fund_updates 
+                 (request_id, type, title, note, admin_user_id, hide_from_public, comm_channel, comm_sent_at, sms_sent, sms_body, email_sent, email_body, created_at)
+                 VALUES (?, 'Follow-up', ?, ?, ?, 0, ?, NOW(), ?, ?, ?, ?, NOW())`,
+                [entityId, title || 'Communication Sent', note, adminUserId, commChannel, didSendSms ? 1 : 0, finalSms, didSendEmail ? 1 : 0, finalEmail]
+            );
+            updateId = res.insertId;
+        }
+        return updateId;
+    } catch (err) {
+        console.error(`[createFollowUpUpdate] Failed to create follow-up for ${modulePrefix} ${entityId}:`, err.message);
+        return null;
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// logCommunication helper — writes to centralized polymorphic table
+// ─────────────────────────────────────────────────────────────────────────────
+const logCommunication = async (modulePrefix, entityId, channel, recipient, message, adminUserId = null, updateId = null) => {
+    try {
+        if (!modulePrefix || !entityId) return; // Cannot log without association
+
+        const moduleLabels = {
+            'C-': 'Complaint',
+            'P-': 'Issue',
+            'I-': 'Idea',
+            'S-': 'Suggestion',
+            'F-': 'Application' // CM Fund Request
+        };
+        const entityType = moduleLabels[modulePrefix];
+        if (!entityType) return; // Unknown module type
+
+        await pool.query(
+            `INSERT INTO communications_logs (entity_type, entity_id, channel, recipient, message, admin_user_id, update_id) 
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [entityType, entityId, channel, recipient, message, adminUserId, updateId]
+        );
+    } catch (err) {
+        console.error(`[logCommunication] Error logging ${channel} to ${entityType} ${entityId}:`, err.message);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // POST /api/notifications/sms
 // Body: { to, message, record_id, record_type }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -22,6 +122,24 @@ export const sendSMSNotification = async (req, res) => {
         }
 
         const result = await sendSMS(to, message);
+
+        // Auto-create follow-up and link communication if associated with a record
+        const prefix = resolveModulePrefix(record_type || req.body.module || req.body.module_prefix);
+        if (record_id && prefix) {
+            const updateId = await createFollowUpUpdate({
+                modulePrefix: prefix,
+                entityId: record_id,
+                title: req.body.status_title || req.body.title || 'Communication Sent',
+                note: message,
+                adminUserId: req.admin?.id || null,
+                commChannel: 'sms',
+                didSendSms: true,
+                finalSms: message,
+                didSendEmail: false,
+                finalEmail: null
+            });
+            await logCommunication(prefix, record_id, 'SMS', to, message, req.admin?.id || null, updateId);
+        }
 
         console.log(
             `[SMS] ✅ Sent to ${to} | ${record_type || 'unknown'} #${record_id || '—'} | Admin: ${req.admin?.full_name || 'system'}`
@@ -54,11 +172,11 @@ export const getSMSStatus = (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/notifications/email
-// Body: { to, message, subject }
+// Body: { to, message, subject, record_id, record_type }
 // ─────────────────────────────────────────────────────────────────────────────
 export const sendEmailNotification = async (req, res) => {
     try {
-        const { to, message, subject } = req.body;
+        const { to, message, subject, record_id, record_type } = req.body;
 
         if (!to || !message) {
             return res.status(400).json({
@@ -73,6 +191,24 @@ export const sendEmailNotification = async (req, res) => {
             message: message,
         });
 
+        // Auto-create follow-up and link communication if associated with a record
+        const prefix = resolveModulePrefix(record_type || req.body.module || req.body.module_prefix);
+        if (record_id && prefix) {
+            const updateId = await createFollowUpUpdate({
+                modulePrefix: prefix,
+                entityId: record_id,
+                title: subject || req.body.status_title || req.body.title || 'Communication Sent',
+                note: message,
+                adminUserId: req.admin?.id || null,
+                commChannel: 'email',
+                didSendSms: false,
+                finalSms: null,
+                didSendEmail: true,
+                finalEmail: message
+            });
+            await logCommunication(prefix, record_id, 'Email', to, message, req.admin?.id || null, updateId);
+        }
+
         console.log(`[Email] ✅ Sent to ${to} | Admin: ${req.admin?.full_name || 'system'}`);
 
         res.json({ success: true, message: 'Email sent successfully.' });
@@ -84,11 +220,11 @@ export const sendEmailNotification = async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/notifications/whatsapp
-// Body: { to, message }
+// Body: { to, message, record_id, record_type }
 // ─────────────────────────────────────────────────────────────────────────────
 export const sendWhatsAppNotification = async (req, res) => {
     try {
-        const { to, message } = req.body;
+        const { to, message, record_id, record_type } = req.body;
 
         if (!to || !message) {
             return res.status(400).json({
@@ -103,6 +239,24 @@ export const sendWhatsAppNotification = async (req, res) => {
         if (!phone.startsWith('91') && phone.length === 10) phone = '91' + phone;
 
         const result = await sendWhatsAppMessage(phone, message);
+
+        // Auto-create follow-up and link communication if associated with a record
+        const prefix = resolveModulePrefix(record_type || req.body.module || req.body.module_prefix);
+        if (record_id && prefix) {
+            const updateId = await createFollowUpUpdate({
+                modulePrefix: prefix,
+                entityId: record_id,
+                title: req.body.status_title || req.body.title || 'Communication Sent',
+                note: message,
+                adminUserId: req.admin?.id || null,
+                commChannel: 'whatsapp',
+                didSendSms: false,
+                finalSms: null,
+                didSendEmail: false,
+                finalEmail: null
+            });
+            await logCommunication(prefix, record_id, 'WhatsApp', waPhone, message, req.admin?.id || null, updateId);
+        }
 
         console.log(`[WhatsApp] ✅ Sent to ${to} | Admin: ${req.admin?.full_name || 'system'}`);
 
@@ -127,7 +281,7 @@ export const sendWhatsAppNotification = async (req, res) => {
 // }
 // ─────────────────────────────────────────────────────────────────────────────
 export const sendBulkNotification = async (req, res) => {
-    const { contacts, channels, scheduledAt } = req.body;
+    const { contacts, channels, scheduledAt, messages, subject } = req.body;
 
     // ── Validate ────────────────────────────────────────────────
     if (!Array.isArray(contacts) || contacts.length === 0) {
@@ -139,7 +293,7 @@ export const sendBulkNotification = async (req, res) => {
 
     const jobId   = randomUUID();
     const adminId = req.admin?.id || 0;
-    const payload = JSON.stringify({ contacts, channels });
+    const payload = JSON.stringify({ contacts, channels, messages, subject });
 
     let initialStatus = 'queued';
     let queryParams = [jobId, adminId, initialStatus, JSON.stringify(channels), contacts.length, null, payload];
@@ -172,7 +326,7 @@ export const sendBulkNotification = async (req, res) => {
     // ── Process asynchronously (fire-and-forget) ────────────────
     if (!scheduledAt) {
         setImmediate(() =>
-            processBulkJob({ jobId, contacts, channels, adminUserId: req.admin?.id || null })
+            processBulkJob({ jobId, contacts, channels, messages, subject, adminUserId: req.admin?.id || null })
                 .catch(err => {
                     console.error('[BulkSend] Unhandled error in processBulkJob:', err.message);
                     pool.query(
@@ -300,32 +454,7 @@ const sendWithRetry = async (fn, contactId, channel, maxRetries = 3) => {
     throw lastErr;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// logCommunication helper — writes to centralized polymorphic table
-// ─────────────────────────────────────────────────────────────────────────────
-const logCommunication = async (modulePrefix, entityId, channel, recipient, message, adminUserId = null) => {
-    try {
-        if (!modulePrefix || !entityId) return; // Cannot log without association
 
-        const moduleLabels = {
-            'C-': 'Complaint',
-            'P-': 'Issue',
-            'I-': 'Idea',
-            'S-': 'Suggestion',
-            'F-': 'Application' // CM Fund Request
-        };
-        const entityType = moduleLabels[modulePrefix];
-        if (!entityType) return; // Unknown module type
-
-        await pool.query(
-            `INSERT INTO communications_logs (entity_type, entity_id, channel, recipient, message, admin_user_id) 
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [entityType, entityId, channel, recipient, message, adminUserId]
-        );
-    } catch (err) {
-        console.error(`[logCommunication] Error logging ${channel} to ${entityType} ${entityId}:`, err.message);
-    }
-};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // processBulkJob — core background processor
@@ -392,9 +521,46 @@ export const processBulkJob = async ({ jobId, contacts, channels, messages, subj
                 dateFiled: contact.dateFiled || null,
             };
 
-            const pSms      = channels.sms      ? followUpUpdateSMS(templateData)      : '';
-            const pWhatsapp = channels.whatsapp ? followUpUpdateWhatsApp(templateData) : '';
-            const emailObj  = channels.email    ? followUpUpdateEmail(templateData)    : null;
+            const formatMessageWithPlaceholders = (text) => {
+                if (!text) return '';
+                const nowStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                return text
+                    .replace(/{{name}}/gi, templateData.name)
+                    .replace(/{{trackingId}}/gi, templateData.referenceNo)
+                    .replace(/{{reference_no}}/gi, templateData.referenceNo)
+                    .replace(/{{module}}/gi, label)
+                    .replace(/{{statusText}}/gi, templateData.statusTitle)
+                    .replace(/{{date}}/gi, nowStr)
+                    .replace(/{{filedDate}}/gi, templateData.dateFiled ? new Date(templateData.dateFiled).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+            };
+
+            const pSms = channels.sms
+                ? (messages?.sms
+                    ? formatMessageWithPlaceholders(messages.sms)
+                    : followUpUpdateSMS(templateData))
+                : '';
+
+            const pWhatsapp = channels.whatsapp
+                ? (messages?.whatsapp
+                    ? formatMessageWithPlaceholders(messages.whatsapp)
+                    : followUpUpdateWhatsApp(templateData))
+                : '';
+
+            const emailObj = channels.email
+                ? (messages?.email
+                    ? {
+                        subject: subject || `Update on your ${label} (${templateData.referenceNo})`,
+                        body: formatMessageWithPlaceholders(messages.email)
+                      }
+                    : followUpUpdateEmail(templateData))
+                : null;
+
+            let didSendSms = false;
+            let didSendEmail = false;
+            let didSendWa = false;
+            let finalSms = null;
+            let finalEmail = null;
+            let finalWa = null;
 
             // ── SMS ──────────────────────────────────────────────
             if (channels.sms && contact.phone) {
@@ -404,8 +570,8 @@ export const processBulkJob = async ({ jobId, contacts, channels, messages, subj
                         () => sendSMS(phone, pSms),
                         contact.id, 'sms'
                     );
-                    contactSentAny = true;
-                    await logCommunication(contact.module, contact.id, 'SMS', phone, pSms, adminUserId);
+                    didSendSms = true;
+                    finalSms = pSms;
                 } catch (err) {
                     const status = err?.response?.status || err?.status || err?.statusCode;
                     if (status === 429) batchHad429 = true;
@@ -425,8 +591,8 @@ export const processBulkJob = async ({ jobId, contacts, channels, messages, subj
                         }),
                         contact.id, 'email'
                     );
-                    contactSentAny = true;
-                    await logCommunication(contact.module, contact.id, 'Email', contact.email, emailObj.body, adminUserId);
+                    didSendEmail = true;
+                    finalEmail = emailObj.body;
                 } catch (err) {
                     const status = err?.response?.status || err?.status || err?.statusCode;
                     if (status === 429) batchHad429 = true;
@@ -444,13 +610,53 @@ export const processBulkJob = async ({ jobId, contacts, channels, messages, subj
                         () => sendWhatsAppMessage(waPhone, pWhatsapp),
                         contact.id, 'whatsapp'
                     );
-                    contactSentAny = true;
-                    await logCommunication(contact.module, contact.id, 'WhatsApp', waPhone, pWhatsapp, adminUserId);
+                    didSendWa = true;
+                    finalWa = pWhatsapp;
                 } catch (err) {
                     const status = err?.response?.status || err?.status || err?.statusCode;
                     if (status === 429) batchHad429 = true;
                     errorLog.push({ contactId: contact.id, channel: 'whatsapp', error: err.message });
                     console.error(`[BulkSend] WhatsApp ❌ contact=${contact.id}:`, err.message);
+                }
+            }
+
+            // ── Auto-create Follow-up Update and Log Communication ─────────────────
+            if (didSendSms || didSendEmail || didSendWa) {
+                contactSentAny = true;
+
+                let commChannel = 'sms';
+                if (didSendSms && didSendEmail) commChannel = 'both';
+                else if (didSendSms) commChannel = 'sms';
+                else if (didSendEmail) commChannel = 'email';
+                else if (didSendWa) commChannel = 'whatsapp';
+
+                const followUpTitle = contact.statusText || 'Communication Sent';
+                const followUpNote = finalSms || finalEmail || finalWa;
+
+                const updateId = await createFollowUpUpdate({
+                    modulePrefix: contact.module,
+                    entityId: contact.id,
+                    title: followUpTitle,
+                    note: followUpNote,
+                    adminUserId,
+                    commChannel,
+                    didSendSms,
+                    finalSms,
+                    didSendEmail,
+                    finalEmail
+                });
+
+                if (didSendSms) {
+                    const phone = normalisePhone(contact.phone);
+                    await logCommunication(contact.module, contact.id, 'SMS', phone, finalSms, adminUserId, updateId);
+                }
+                if (didSendEmail) {
+                    await logCommunication(contact.module, contact.id, 'Email', contact.email, finalEmail, adminUserId, updateId);
+                }
+                if (didSendWa) {
+                    const raw = String(contact.phone).replace(/\D/g, '');
+                    const waPhone = raw.length === 10 ? `91${raw}` : (raw.startsWith('91') ? raw : raw);
+                    await logCommunication(contact.module, contact.id, 'WhatsApp', waPhone, finalWa, adminUserId, updateId);
                 }
             }
 
