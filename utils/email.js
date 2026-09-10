@@ -4,13 +4,26 @@ import pool from '../configs/db.js';
 
 const APP_NAME = process.env.APP_NAME || 'Shibu Theckumpuram';
 const MAIL_FROM = process.env.MAIL_FROM || `"${APP_NAME}" <no-reply@shibu-theckumpuram.com>`;
-const FRONTEND_URL = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',')[0] : 'http://localhost:5173';
+// Reads FRONTEND_URL fresh on every call so hot-reloaded env changes take effect.
+// When multiple URLs are provided (comma-separated), prefers the first non-localhost
+// entry so that production invite/reset links never point to localhost:5173.
+const getFrontendUrl = () => {
+  const urls = (process.env.FRONTEND_URL || '')
+    .split(',')
+    .map(u => u.trim())
+    .filter(Boolean);
+  if (urls.length === 0) return 'http://localhost:5173';
+  const nonLocal = urls.find(
+    u => !u.includes('localhost') && !u.includes('127.0.0.1')
+  );
+  return nonLocal || urls[0];
+};
 
 // ─────────────────────────────────────────────────────────────
 //  Forgot Password Email
 // ─────────────────────────────────────────────────────────────
 export const sendPasswordResetEmail = async ({ to, name, token }) => {
-  const resetLink = `${FRONTEND_URL}/admin/reset-password?token=${token}`;
+  const resetLink = `${getFrontendUrl()}/admin/reset-password?token=${token}`;
 
   await transporter.sendMail({
     from: MAIL_FROM,
@@ -50,7 +63,7 @@ export const sendPasswordResetEmail = async ({ to, name, token }) => {
 //  Admin Invite Email
 // ─────────────────────────────────────────────────────────────
 export const sendAdminInviteEmail = async ({ to, name, token, roleName }) => {
-  const resetLink = `${FRONTEND_URL}/admin/reset-password?token=${token}`;
+  const resetLink = `${getFrontendUrl()}/admin/reset-password?token=${token}`;
 
   await transporter.sendMail({
     from: MAIL_FROM,
@@ -90,7 +103,7 @@ export const sendAdminInviteEmail = async ({ to, name, token, roleName }) => {
 //  Constituent Forgot Password Email
 // ─────────────────────────────────────────────────────────────
 export const sendConstituentPasswordResetEmail = async ({ to, name, token }) => {
-  const resetLink = `${FRONTEND_URL}/mla-connect/reset-password?token=${token}`;
+  const resetLink = `${getFrontendUrl()}/mla-connect/reset-password?token=${token}`;
 
   await transporter.sendMail({
     from: MAIL_FROM,
@@ -228,7 +241,7 @@ export const sendAdminEnquiryAlert = async (enquiry) => {
               <p style="margin:0;color:#444;line-height:1.6;">${message}</p>
             </div>
             <div style="margin-top:24px;text-align:center;">
-              <a href="${FRONTEND_URL}/admin/dashboard/enquiries"
+              <a href="${getFrontendUrl()}/admin/dashboard/enquiries"
                  style="background:#035194;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:14px;display:inline-block;">
                 View in Admin Panel →
               </a>

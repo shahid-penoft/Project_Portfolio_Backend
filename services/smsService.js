@@ -71,7 +71,20 @@ export const sendSMSSafe = async (to, content) => {
     }
 };
 
-const FRONTEND_URL = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',')[0] : 'http://localhost:5173';
+// Reads FRONTEND_URL fresh on every call. When multiple comma-separated URLs are
+// present, prefers the first non-localhost entry so SMS invite links never point
+// to localhost:5173 in production.
+const getFrontendUrl = () => {
+    const urls = (process.env.FRONTEND_URL || '')
+        .split(',')
+        .map(u => u.trim())
+        .filter(Boolean);
+    if (urls.length === 0) return 'http://localhost:5173';
+    const nonLocal = urls.find(
+        u => !u.includes('localhost') && !u.includes('127.0.0.1')
+    );
+    return nonLocal || urls[0];
+};
 const APP_NAME = process.env.APP_NAME || 'MLA Connect';
 
 /**

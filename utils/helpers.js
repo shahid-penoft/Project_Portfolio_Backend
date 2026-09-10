@@ -23,7 +23,7 @@ export const minutesFromNow = (minutes) => {
 export const createShortLink = async (longUrl, minutesValid = 30) => {
     // Generate an 8-character alphanumeric short code
     const code = crypto.randomBytes(6).toString('base64url').slice(0, 8);
-    const backendUrl = process.env.BACKEND_URL || (process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',')[0] : 'http://localhost:5000');
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:5000';
 
     await db.query(
         'INSERT INTO short_links (code, long_url, expires_at) VALUES (?, ?, UTC_TIMESTAMP() + INTERVAL ? MINUTE)',

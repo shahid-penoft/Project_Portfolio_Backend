@@ -90,7 +90,8 @@ export const createAdminUser = async (req, res) => {
             });
         }
         if (phone) {
-            const frontendUrl = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',')[0] : 'http://localhost:5173';
+            const urls = (process.env.FRONTEND_URL || '').split(',').map(u => u.trim()).filter(Boolean);
+            const frontendUrl = urls.find(u => !u.includes('localhost') && !u.includes('127.0.0.1')) || urls[0] || 'http://localhost:5173';
             const fullLink = `${frontendUrl}/admin/reset-password?token=${token}`;
             const shortLink = await createShortLink(fullLink, 7 * 24 * 60); // 7 days in minutes
             await sendAdminInviteSMS({

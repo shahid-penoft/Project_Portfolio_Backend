@@ -139,12 +139,14 @@ app.get('/api/r/:code', async (req, res) => {
             return res.redirect(302, rows[0].long_url);
         }
         // If expired or invalid
-        const frontendUrl = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',')[0] : 'http://localhost:5173';
+        const _urls1 = (process.env.FRONTEND_URL || '').split(',').map(u => u.trim()).filter(Boolean);
+        const frontendUrl = _urls1.find(u => !u.includes('localhost') && !u.includes('127.0.0.1')) || _urls1[0] || 'http://localhost:5173';
         return res.redirect(302, `${frontendUrl}/admin/login?error=link-expired`);
     } catch (err) {
         console.error('[ShortLinkError]', err);
-        const frontendUrl = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',')[0] : 'http://localhost:5173';
-        return res.redirect(302, `${frontendUrl}/admin/login?error=server-error`);
+        const _urls2 = (process.env.FRONTEND_URL || '').split(',').map(u => u.trim()).filter(Boolean);
+        const frontendUrl2 = _urls2.find(u => !u.includes('localhost') && !u.includes('127.0.0.1')) || _urls2[0] || 'http://localhost:5173';
+        return res.redirect(302, `${frontendUrl2}/admin/login?error=server-error`);
     }
 });
 
