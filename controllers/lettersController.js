@@ -80,6 +80,8 @@ export const getAllLetters = async (req, res) => {
         if (priority) { baseConditions.push('l.priority = ?'); baseParams.push(priority); }
         if (req.query.category === 'recommendation') {
             baseConditions.push("l.type = 'Recommendation'");
+        } else if (req.query.category === 'general') {
+            baseConditions.push("l.type != 'Recommendation'");
         }
         if (req.query.trashed === 'true') {
             baseConditions.push('l.trashed_at IS NOT NULL');
@@ -396,7 +398,22 @@ export const restoreLetter = async (req, res) => {
 // DELETE /api/admin/letters/:id/permanent
 // ─────────────────────────────────────────────────────────────
 export const permanentDeleteLetter = async (req, res) => {
-    return trashLetter(req, res);
+    try {
+        const { id } = req.params;
+
+        const [[letter]] = await pool.query(
+            'SELECT id, letter_id FROM mla_letters WHERE id = ? AND trashed_at IS NOT NULL', [id]
+        );
+        if (!letter) return res.status(404).json({ success: false, message: 'Letter not found in trash.' });
+
+        await pool.query('DELETE FROM mla_letters WHERE id = ?', [id]);
+
+        auditLog(req, { action: 'Deleted', module: 'Letters', details: `Letter ${letter.letter_id} permanently deleted`, resource: `letters/${id}`, severity: 'warning' });
+        res.json({ success: true, message: 'Letter permanently deleted.' });
+    } catch (err) {
+        console.error('[permanentDeleteLetter]', err);
+        res.status(500).json({ success: false, message: 'Failed to permanently delete letter.' });
+    }
 };
 
 
@@ -457,7 +474,7 @@ export const patchResponseStatus = async (req, res) => {
 export const sendLetterEmail = async (req, res) => {
     try {
         const { id } = req.params;
-        const { recipient_email, cc, send_as_pdf_attachment } = req.body;
+        const { recipient_email, cc, send_as_pdf_attachment, message } = req.body;
 
         // Validate email
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -475,7 +492,10 @@ export const sendLetterEmail = async (req, res) => {
             try { templateConfig = JSON.parse(setting.setting_value); } catch(e) {}
         }
 
-        const htmlBody  = buildLetterHtmlTemplate(letter, templateConfig);
+        const letterHtml = buildLetterHtmlTemplate(letter, templateConfig);
+        const htmlBody = message
+            ? `<div style="font-family:Georgia,'Palatino Linotype','Book Antiqua',serif;font-size:14px;color:#374151;line-height:1.8;margin-bottom:24px;">${message.replace(/\n/g, '<br/>')}</div><hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/>${letterHtml}`
+            : letterHtml;
         const mailOpts  = {
             from:    `"MLA Office Kothamangalam" <${process.env.MAIL_FROM_ADDRESS || process.env.SMTP_USER}>`,
             to:      recipient_email,
